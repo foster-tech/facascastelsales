@@ -327,8 +327,9 @@ export default function Index() {
     }
 
     try {
-      const response = await fetch(window.location.pathname, {
+      const response = await fetch(window.location.href, {
         method: "POST",
+        credentials: "include",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ mode: "customer-create", payload }),
       });
@@ -370,8 +371,9 @@ export default function Index() {
     setError("");
 
     try {
-      const response = await fetch(window.location.pathname, {
+      const response = await fetch(window.location.href, {
         method: "POST",
+        credentials: "include",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
           customerId: selectedCustomer?.id ?? null,
