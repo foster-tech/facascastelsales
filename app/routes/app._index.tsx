@@ -82,45 +82,37 @@ export const loader = async ({ request }: LoaderFunctionArgs) => {
 };
 
 export const action = async ({ request }: ActionFunctionArgs) => {
-  if (request.method !== "POST") {
-    return Response.json(
-      { success: false, message: "Método inválido" },
-      { status: 405 },
-    );
-  }
-
-  let payload: any;
-
   try {
-    payload = await request.json();
-  } catch {
-    return Response.json(
-      { success: false, message: "Payload inválido" },
-      { status: 400 },
-    );
-  }
-
-  if (payload?.mode === "customer-create") {
-    const result = await createShopifyCustomer(request, payload.payload);
-
-    if (result?.userErrors?.length) {
+    if (request.method !== "POST") {
       return Response.json(
-        { success: false, message: result.userErrors[0].message },
+        { success: false, message: "Método inválido" },
+        { status: 405 },
+      );
+    }
+
+    const payload = await request.json();
+
+    if (payload?.mode === "customer-create") {
+      const result = await createShopifyCustomer(request, payload.payload);
+
+      if (result?.userErrors?.length) {
+        return Response.json(
+          { success: false, message: result.userErrors[0].message },
+          { status: 400 },
+        );
+      }
+
+      return Response.json({ success: true, customer: result.customer });
+    }
+
+    if (!payload || !Array.isArray(payload.items) || payload.items.length === 0) {
+      return Response.json(
+        { success: false, message: "Adicione ao menos um produto" },
         { status: 400 },
       );
     }
 
-    return Response.json({ success: true, customer: result.customer });
-  }
-
-  if (!payload || !Array.isArray(payload.items) || payload.items.length === 0) {
-    return Response.json(
-      { success: false, message: "Adicione ao menos um produto" },
-      { status: 400 },
-    );
-  }
-
-  const lineItems = payload.items.flatMap((item: any) => {
+    const lineItems = payload.items.flatMap((item: any) => {
     const quantity = Math.max(1, Number(item.quantity || 1));
     const engravings = Array.isArray(item.engravings) ? item.engravings : [];
 
@@ -142,29 +134,47 @@ export const action = async ({ request }: ActionFunctionArgs) => {
         ...(value ? { customAttributes: [{ key: "Personalização", value }] } : {}),
       };
     });
-  });
+    });
 
-  const result = await createDraftOrder(request, {
-    customerId: payload.customerId || null,
-    note: payload.note || "",
-    items: lineItems,
-  });
+    const result = await createDraftOrder(request, {
+      customerId: payload.customerId || null,
+      note: payload.note || "",
+      items: lineItems,
+    });
 
-  if (result.userErrors?.length) {
+    if (result.userErrors?.length) {
+      return Response.json(
+        { success: false, message: result.userErrors[0].message },
+        { status: 400 },
+      );
+    }
+
+    if (!result.draftOrder || !result.draftOrder.invoiceUrl) {
+      return Response.json(
+        { success: false, message: "Pedido criado, mas sem link de pagamento" },
+        { status: 400 },
+      );
+    }
+
+    return Response.json({ success: true, draftOrder: result.draftOrder });
+  } catch (actionError) {
+    console.error("Erro ao processar ação do pedido", actionError);
+
+    if (actionError instanceof Response) {
+      return actionError;
+    }
+
     return Response.json(
-      { success: false, message: result.userErrors[0].message },
-      { status: 400 },
+      {
+        success: false,
+        message:
+          actionError instanceof Error
+            ? actionError.message
+            : "Erro interno ao criar o pedido.",
+      },
+      { status: 500 },
     );
   }
-
-  if (!result.draftOrder || !result.draftOrder.invoiceUrl) {
-    return Response.json(
-      { success: false, message: "Pedido criado, mas sem link de pagamento" },
-      { status: 400 },
-    );
-  }
-
-  return Response.json({ success: true, draftOrder: result.draftOrder });
 };
 
 export default function Index() {

@@ -55,7 +55,24 @@ export async function createDraftOrder(request: Request, input: DraftOrderInput)
     },
   );
 
-  const payload = await response.json();
+  const payload = (await response.json()) as {
+    data?: {
+      draftOrderCreate?: {
+        draftOrder?: { id: string; name: string; invoiceUrl: string; totalPrice: string };
+        userErrors?: Array<{ message?: string }>;
+      };
+    };
+    errors?: Array<{ message?: string }>;
+  };
+  if (payload?.errors?.length) {
+    return {
+      draftOrder: null,
+      userErrors: payload.errors.map((error: { message?: string }) => ({
+        message: error.message || "Erro GraphQL ao criar o pedido.",
+      })),
+    };
+  }
+
   const data = payload?.data?.draftOrderCreate ?? { draftOrder: null, userErrors: [] };
 
   return data;
