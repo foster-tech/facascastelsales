@@ -1,4 +1,5 @@
 import { useEffect, useMemo, useState } from "react";
+import { useFetcher } from "react-router";
 import type {
   ActionFunctionArgs,
   HeadersFunction,
@@ -187,6 +188,31 @@ export default function Index() {
   const [error, setError] = useState("");
   const [success, setSuccess] = useState<{ name: string; invoiceUrl: string } | null>(null);
   const [isCreating, setIsCreating] = useState(false);
+  const draftOrderFetcher = useFetcher<any>();
+
+  useEffect(() => {
+    if (draftOrderFetcher.state === "submitting") {
+      setIsCreating(true);
+      return;
+    }
+
+    if (draftOrderFetcher.state !== "idle" || !draftOrderFetcher.data) {
+      return;
+    }
+
+    const result = draftOrderFetcher.data;
+    if (!result.success) {
+      setError(result.message || "Não foi possível criar o pedido.");
+      setIsCreating(false);
+      return;
+    }
+
+    setSuccess({
+      name: result.draftOrder.name || "Pedido",
+      invoiceUrl: result.draftOrder.invoiceUrl,
+    });
+    setIsCreating(false);
+  }, [draftOrderFetcher.data, draftOrderFetcher.state]);
 
   useEffect(() => {
     const timeout = window.setTimeout(async () => {
@@ -367,44 +393,21 @@ export default function Index() {
       return;
     }
 
-    setIsCreating(true);
     setError("");
 
-    try {
-      const response = await fetch(window.location.href, {
-        method: "POST",
-        credentials: "include",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          customerId: selectedCustomer?.id ?? null,
-          note,
-          items: orderItems.map((item) => ({
-            variantId: item.variantId,
-            quantity: item.quantity,
-            originalUnitPrice: item.displayPrice,
-            engravings: item.engravings,
-          })),
-        }),
-      });
-
-      const result = await parseJsonResponse(response);
-      if (!response.ok || !result?.success) {
-        throw new Error(result?.message || "Não foi possível criar o pedido.");
-      }
-
-      setSuccess({
-        name: result.draftOrder.name || "Pedido",
-        invoiceUrl: result.draftOrder.invoiceUrl,
-      });
-    } catch (requestError) {
-      setError(
-        requestError instanceof Error
-          ? requestError.message
-          : "Não foi possível criar o pedido.",
-      );
-    } finally {
-      setIsCreating(false);
-    }
+    draftOrderFetcher.submit(
+      JSON.stringify({
+        customerId: selectedCustomer?.id ?? null,
+        note,
+        items: orderItems.map((item) => ({
+          variantId: item.variantId,
+          quantity: item.quantity,
+          originalUnitPrice: item.displayPrice,
+          engravings: item.engravings,
+        })),
+      }),
+      { method: "post", encType: "application/json" },
+    );
   };
 
   const canCreateOrder = orderItems.length > 0 && !isCreating;
