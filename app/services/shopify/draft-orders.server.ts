@@ -31,7 +31,7 @@ export async function createDraftOrder(request: Request, input: DraftOrderInput)
   const response = await admin.graphql(
     `#graphql
       mutation DraftOrderCreate($input: DraftOrderInput!) {
-        draftOrderCreate(draftOrder: $input) {
+        draftOrderCreate(input: $input) {
           draftOrder {
             id
             name
