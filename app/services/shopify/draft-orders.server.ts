@@ -3,10 +3,14 @@ import { authenticate } from "../../shopify.server";
 export type DraftOrderInput = {
   customerId?: string | null;
   note?: string | null;
+  customAttributes?: Array<{
+    key: string;
+    value: string;
+  }>;
   items: Array<{
     variantId: string;
     quantity: number;
-    originalUnitPrice?: string;
+    priceOverride?: string;
     customAttributes?: Array<{
       key: string;
       value: string;
@@ -17,11 +21,42 @@ export type DraftOrderInput = {
 export async function createDraftOrder(request: Request, input: DraftOrderInput) {
   const { admin } = await authenticate.admin(request);
 
+  const staffResponse = await admin.graphql(
+    `#graphql
+      query CurrentStaffMember {
+        currentStaffMember {
+          name
+          email
+        }
+        shop {
+          currencyCode
+        }
+      }`,
+  );
+  const staffPayload = (await staffResponse.json()) as {
+    data?: {
+      currentStaffMember?: { name?: string; email?: string } | null;
+      shop?: { currencyCode?: string };
+    };
+  };
+  const staffMember = staffPayload.data?.currentStaffMember;
+  const currencyCode = staffPayload.data?.shop?.currencyCode || "BRL";
+  const sellerName = staffMember?.name || staffMember?.email || "Não identificado";
+  const sellerAttribute = { key: "Vendedor", value: sellerName };
+  const note = [input.note?.trim(), `Vendedor: ${sellerName}`]
+    .filter(Boolean)
+    .join("\n");
+
   const lineItems = input.items.map((item) => ({
     quantity: Math.max(1, Number(item.quantity) || 1),
     variantId: item.variantId,
-    ...(item.originalUnitPrice
-      ? { originalUnitPrice: item.originalUnitPrice }
+    ...(item.priceOverride
+      ? {
+          priceOverride: {
+            amount: item.priceOverride,
+            currencyCode,
+          },
+        }
       : {}),
     ...(item.customAttributes && item.customAttributes.length > 0
       ? { customAttributes: item.customAttributes }
@@ -48,7 +83,11 @@ export async function createDraftOrder(request: Request, input: DraftOrderInput)
       variables: {
         input: {
           customerId: input.customerId || null,
-          note: input.note || "",
+          note,
+          customAttributes: [
+            ...(input.customAttributes || []),
+            sellerAttribute,
+          ],
           lineItems,
         },
       },

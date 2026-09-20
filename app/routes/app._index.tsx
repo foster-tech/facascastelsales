@@ -120,7 +120,7 @@ export const action = async ({ request }: ActionFunctionArgs) => {
       return [{
         variantId: item.variantId,
         quantity,
-        originalUnitPrice: String(item.originalUnitPrice || "0"),
+        priceOverride: String(item.originalUnitPrice || "0"),
       }];
     }
 
@@ -130,7 +130,7 @@ export const action = async ({ request }: ActionFunctionArgs) => {
       return {
         variantId: item.variantId,
         quantity: 1,
-        originalUnitPrice: String(item.originalUnitPrice || "0"),
+        priceOverride: String(item.originalUnitPrice || "0"),
         ...(value ? { customAttributes: [{ key: "Personalização", value }] } : {}),
       };
     });
