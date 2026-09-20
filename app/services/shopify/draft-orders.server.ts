@@ -19,31 +19,25 @@ export type DraftOrderInput = {
 };
 
 export async function createDraftOrder(request: Request, input: DraftOrderInput) {
-  const { admin } = await authenticate.admin(request);
+  const { admin, session } = await authenticate.admin(request);
 
-  const staffResponse = await admin.graphql(
+  const shopResponse = await admin.graphql(
     `#graphql
-      query CurrentStaffMember {
-        currentStaffMember {
-          name
-          email
-        }
+      query ShopCurrency {
         shop {
           currencyCode
         }
       }`,
   );
-  const staffPayload = (await staffResponse.json()) as {
-    data?: {
-      currentStaffMember?: { name?: string; email?: string } | null;
-      shop?: { currencyCode?: string };
-    };
+  const shopPayload = (await shopResponse.json()) as {
+    data?: { shop?: { currencyCode?: string } };
   };
-  const staffMember = staffPayload.data?.currentStaffMember;
-  const currencyCode = staffPayload.data?.shop?.currencyCode || "BRL";
-  const sellerName = staffMember?.name || staffMember?.email || "Não identificado";
-  const sellerAttribute = { key: "Vendedor", value: sellerName };
-  const note = [input.note?.trim(), `Vendedor: ${sellerName}`]
+  const currencyCode = shopPayload.data?.shop?.currencyCode || "BRL";
+  const sellerId = session?.onlineAccessInfo?.associated_user?.id
+    ? String(session.onlineAccessInfo.associated_user.id)
+    : "não identificado";
+  const sellerAttribute = { key: "Vendedor ID", value: sellerId };
+  const note = [input.note?.trim(), `Vendedor ID: ${sellerId}`]
     .filter(Boolean)
     .join("\n");
 
