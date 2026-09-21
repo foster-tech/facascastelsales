@@ -45,6 +45,14 @@ BLING_ORDER_UPDATE_METHOD=PUT
 BLING_RETRY_SECRET=...
 ```
 
+The SQLite database must use persistent storage in Render. Add a Render Persistent Disk mounted at `/var/data` and configure:
+
+```text
+DATABASE_URL=file:/var/data/dev.sqlite
+```
+
+Without a persistent disk or an external database, Render can delete `dev.sqlite` during a redeploy or restart, including all sellers and Shopify sessions. After configuring the disk, deploy once so `prisma migrate deploy` creates the tables there.
+
 The Bling update preserves the imported order and omits the `loja` field to represent no store, rather than sending the display label `Nenhuma`. Pending imports can be retried by an authorized scheduler with `POST /api/bling/retry` and the `x-bling-retry-secret` header.
 
 ### Authenticating and querying data
