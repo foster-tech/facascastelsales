@@ -258,7 +258,11 @@ export default function Index() {
 
       try {
         const response = await fetch(
-          `/api/sellers?query=${encodeURIComponent(sellerQuery)}`,
+          `/api/sellers?${new URLSearchParams({
+            ...Object.fromEntries(new URLSearchParams(window.location.search)),
+            query: sellerQuery,
+          }).toString()}`,
+          { credentials: "include" },
         );
         if (!response.ok) {
           throw new Error("Não foi possível buscar vendedores.");
