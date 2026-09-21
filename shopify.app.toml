@@ -7,7 +7,7 @@ name = "facas-castel-sales"
 
 [access_scopes]
 # Learn more at https://shopify.dev/docs/apps/tools/cli/configuration#access_scopes
-scopes = "write_products,write_metaobjects,write_metaobject_definitions,read_customers,write_customers,write_draft_orders"
+scopes = "write_products,write_metaobjects,write_metaobject_definitions,read_customers,write_customers,write_draft_orders,read_orders,write_orders"
 
 [product.metafields.app.demo_info]
 type = "single_line_text_field"
@@ -43,6 +43,10 @@ api_version = "2026-10"
   [[webhooks.subscriptions]]
   uri = "/webhooks/app/scopes_update"
   topics = [ "app/scopes_update" ]
+
+  [[webhooks.subscriptions]]
+  uri = "/webhooks/orders/paid"
+  topics = [ "orders/paid" ]
 
 [auth]
 redirect_urls = [ "https://facascastelsales.onrender.com/api/auth" ]

@@ -3,10 +3,8 @@ import { authenticate } from "../../shopify.server";
 export type DraftOrderInput = {
   customerId?: string | null;
   note?: string | null;
-  customAttributes?: Array<{
-    key: string;
-    value: string;
-  }>;
+  sellerId: string;
+  sellerName: string;
   items: Array<{
     variantId: string;
     quantity: number;
@@ -19,7 +17,7 @@ export type DraftOrderInput = {
 };
 
 export async function createDraftOrder(request: Request, input: DraftOrderInput) {
-  const { admin, session } = await authenticate.admin(request);
+  const { admin } = await authenticate.admin(request);
 
   const shopResponse = await admin.graphql(
     `#graphql
@@ -33,11 +31,7 @@ export async function createDraftOrder(request: Request, input: DraftOrderInput)
     data?: { shop?: { currencyCode?: string } };
   };
   const currencyCode = shopPayload.data?.shop?.currencyCode || "BRL";
-  const sellerId = session?.onlineAccessInfo?.associated_user?.id
-    ? String(session.onlineAccessInfo.associated_user.id)
-    : "não identificado";
-  const sellerAttribute = { key: "Vendedor ID", value: sellerId };
-  const note = [input.note?.trim(), `Vendedor ID: ${sellerId}`]
+  const note = [input.note?.trim(), `Vendedor: ${input.sellerName}`]
     .filter(Boolean)
     .join("\n");
 
@@ -79,8 +73,8 @@ export async function createDraftOrder(request: Request, input: DraftOrderInput)
           customerId: input.customerId || null,
           note,
           customAttributes: [
-            ...(input.customAttributes || []),
-            sellerAttribute,
+            { key: "vendedor", value: input.sellerName },
+            { key: "_seller_id", value: input.sellerId },
           ],
           lineItems,
         },

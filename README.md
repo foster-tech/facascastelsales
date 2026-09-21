@@ -32,6 +32,21 @@ Press P to open the URL to your app. Once you click install, you can start devel
 
 Local development is powered by [the Shopify CLI](https://shopify.dev/docs/apps/tools/cli). It logs into your account, connects to an app, provides environment variables, updates remote config, creates a tunnel and provides commands to generate extensions.
 
+### Internal sales and Bling synchronization
+
+The internal order screen requires a local seller from the `Seller` table. The selected seller name and `_seller_id` are stored on the Shopify Draft Order. When the order is paid, the `orders/paid` webhook writes `custom.vendedor` to the final Shopify Order and attempts to update the corresponding Bling sales order using its `numeroLoja` external identifier.
+
+Configure these server environment variables for Bling:
+
+```text
+BLING_API_BASE_URL=https://api.bling.com.br/Api/v3
+BLING_ACCESS_TOKEN=...
+BLING_ORDER_UPDATE_METHOD=PUT
+BLING_RETRY_SECRET=...
+```
+
+The Bling update preserves the imported order and omits the `loja` field to represent no store, rather than sending the display label `Nenhuma`. Pending imports can be retried by an authorized scheduler with `POST /api/bling/retry` and the `x-bling-retry-secret` header.
+
 ### Authenticating and querying data
 
 To authenticate and query data you can use the `shopify` const that is exported from `/app/shopify.server.js`:

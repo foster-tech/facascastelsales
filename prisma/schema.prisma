@@ -32,3 +32,37 @@ model Session {
   refreshToken        String?
   refreshTokenExpires DateTime?
 }
+
+model Seller {
+  id             String   @id @default(cuid())
+  name           String
+  normalizedName String   @unique
+  active         Boolean  @default(true)
+  createdAt      DateTime @default(now())
+  updatedAt      DateTime @updatedAt
+}
+
+enum BlingOrderSyncStatus {
+  PENDING
+  SYNCED
+  FAILED
+}
+
+model BlingOrderSync {
+  id              String             @id @default(cuid())
+  shopDomain      String
+  shopifyOrderId  String
+  shopifyOrderName String
+  sellerId        String?
+  sellerName      String?
+  blingOrderId    String?
+  webhookId       String?
+  status          BlingOrderSyncStatus @default(PENDING)
+  attempts        Int                @default(0)
+  lastError       String?
+  createdAt       DateTime           @default(now())
+  updatedAt       DateTime           @updatedAt
+
+  @@unique([shopDomain, shopifyOrderId])
+  @@index([status, updatedAt])
+}

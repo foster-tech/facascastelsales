@@ -8,6 +8,7 @@ import type {
 import { boundary } from "@shopify/shopify-app-react-router/server";
 
 import { authenticate } from "../shopify.server";
+import { createOrGetSeller, getActiveSeller } from "../services/sellers.server";
 import { createCustomer as createShopifyCustomer } from "../services/shopify/customers.server";
 import { createDraftOrder } from "../services/shopify/draft-orders.server";
 
@@ -16,6 +17,11 @@ type CustomerResult = {
   name: string;
   email?: string | null;
   phone?: string | null;
+};
+
+type SellerResult = {
+  id: string;
+  name: string;
 };
 
 type ProductResult = {
@@ -105,12 +111,26 @@ export const action = async ({ request }: ActionFunctionArgs) => {
       return Response.json({ success: true, customer: result.customer });
     }
 
+    if (payload?.mode === "seller-create") {
+      const seller = await createOrGetSeller(String(payload.name || ""));
+      return Response.json({ success: true, seller });
+    }
+
     if (!payload || !Array.isArray(payload.items) || payload.items.length === 0) {
       return Response.json(
         { success: false, message: "Adicione ao menos um produto" },
         { status: 400 },
       );
     }
+
+    if (!payload.sellerId) {
+      return Response.json(
+        { success: false, message: "Selecione o vendedor responsável pelo pedido." },
+        { status: 400 },
+      );
+    }
+
+    const seller = await getActiveSeller(String(payload.sellerId));
 
     const lineItems = payload.items.flatMap((item: any) => {
     const quantity = Math.max(1, Number(item.quantity || 1));
@@ -139,6 +159,8 @@ export const action = async ({ request }: ActionFunctionArgs) => {
     const result = await createDraftOrder(request, {
       customerId: payload.customerId || null,
       note: payload.note || "",
+      sellerId: seller.id,
+      sellerName: seller.name,
       items: lineItems,
     });
 
@@ -178,6 +200,11 @@ export const action = async ({ request }: ActionFunctionArgs) => {
 };
 
 export default function Index() {
+  const [sellerQuery, setSellerQuery] = useState("");
+  const [sellerResults, setSellerResults] = useState<SellerResult[]>([]);
+  const [selectedSeller, setSelectedSeller] = useState<SellerResult | null>(null);
+  const [sellerLoading, setSellerLoading] = useState(false);
+  const [sellerError, setSellerError] = useState("");
   const [customerQuery, setCustomerQuery] = useState("");
   const [customerResults, setCustomerResults] = useState<CustomerResult[]>([]);
   const [selectedCustomer, setSelectedCustomer] = useState<CustomerResult | null>(null);
@@ -199,6 +226,35 @@ export default function Index() {
   const [success, setSuccess] = useState<{ name: string; invoiceUrl: string } | null>(null);
   const [isCreating, setIsCreating] = useState(false);
   const draftOrderFetcher = useFetcher<any>();
+
+  useEffect(() => {
+    const timeout = window.setTimeout(async () => {
+      if (!sellerQuery.trim()) {
+        setSellerResults([]);
+        setSellerLoading(false);
+        return;
+      }
+
+      setSellerLoading(true);
+      setSellerError("");
+
+      try {
+        const response = await fetch(
+          `/api/sellers?query=${encodeURIComponent(sellerQuery)}`,
+        );
+        if (!response.ok) {
+          throw new Error("Não foi possível buscar vendedores.");
+        }
+        setSellerResults((await response.json()) as SellerResult[]);
+      } catch {
+        setSellerError("Não foi possível carregar vendedores.");
+      } finally {
+        setSellerLoading(false);
+      }
+    }, 300);
+
+    return () => window.clearTimeout(timeout);
+  }, [sellerQuery]);
 
   useEffect(() => {
     if (draftOrderFetcher.state === "submitting") {
@@ -397,7 +453,43 @@ export default function Index() {
     }
   };
 
+  const createSeller = async () => {
+    const name = sellerQuery.trim();
+    if (!name) {
+      setSellerError("Informe o nome do vendedor.");
+      return;
+    }
+
+    try {
+      const response = await fetch(window.location.href, {
+        method: "POST",
+        credentials: "include",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ mode: "seller-create", name }),
+      });
+      const result = await parseJsonResponse(response);
+      if (!response.ok || !result?.seller?.id) {
+        throw new Error(result?.message || "Não foi possível criar o vendedor.");
+      }
+
+      setSelectedSeller(result.seller);
+      setSellerQuery("");
+      setSellerResults([]);
+    } catch (sellerErrorMessage) {
+      setSellerError(
+        sellerErrorMessage instanceof Error
+          ? sellerErrorMessage.message
+          : "Não foi possível criar o vendedor.",
+      );
+    }
+  };
+
   const handleCreateDraftOrder = async () => {
+    if (!selectedSeller) {
+      setError("Selecione o vendedor responsável pelo pedido.");
+      return;
+    }
+
     if (orderItems.length === 0) {
       setError("Adicione ao menos um produto ao pedido.");
       return;
@@ -407,6 +499,7 @@ export default function Index() {
 
     draftOrderFetcher.submit(
       JSON.stringify({
+        sellerId: selectedSeller.id,
         customerId: selectedCustomer?.id ?? null,
         note,
         items: orderItems.map((item) => ({
@@ -420,117 +513,56 @@ export default function Index() {
     );
   };
 
-  const canCreateOrder = orderItems.length > 0 && !isCreating;
+  const canCreateOrder = Boolean(selectedSeller) && orderItems.length > 0 && !isCreating;
 
   return (
     <s-page heading="Novo Pedido">
       <s-section>
         <s-stack direction="block" gap="base">
-          <s-heading>Produtos</s-heading>
-          <s-text-field
-            label="Buscar produto"
-            value={productQuery}
-            onInput={(event: any) => setProductQuery(event.target.value || "")}
-          />
-
-          {productLoading && <s-paragraph>Buscando produtos…</s-paragraph>}
-
-          {productResults.length > 0 && (
-            <s-stack direction="block" gap="base">
-              {productResults.map((product) => (
-                <s-box
-                  key={product.id}
-                  padding="base"
-                  borderWidth="base"
-                  borderRadius="base"
-                >
-                  <s-stack direction="block" gap="base">
-                    {product.image && (
-                      <img
-                        src={product.image}
-                        alt={product.productTitle}
-                        style={{ maxWidth: 80, borderRadius: 8 }}
-                      />
-                    )}
-                    <s-text>{product.productTitle}</s-text>
-                    <s-text>{product.variantTitle}</s-text>
-                    <s-text>SKU: {product.sku || "—"}</s-text>
-                    <s-text>{formatPrice(product.price)}</s-text>
-                    <s-button onClick={() => addProduct(product)}>Adicionar</s-button>
-                  </s-stack>
-                </s-box>
-              ))}
-            </s-stack>
-          )}
-        </s-stack>
-      </s-section>
-
-      <s-section>
-        <s-stack direction="block" gap="base">
-          <s-heading>Produtos do pedido</s-heading>
-
-          {orderItems.length === 0 ? (
-            <s-paragraph>Nenhum produto adicionado.</s-paragraph>
-          ) : (
-            orderItems.map((item) => (
-              <s-box
-                key={item.localId}
-                padding="base"
-                borderWidth="base"
-                borderRadius="base"
-              >
+          <s-heading>Vendedor</s-heading>
+          {!selectedSeller ? (
+            <>
+              <s-text-field
+                label="Buscar vendedor"
+                value={sellerQuery}
+                onInput={(event: any) => setSellerQuery(event.target.value || "")}
+              />
+              {sellerLoading && <s-paragraph>Buscando vendedores…</s-paragraph>}
+              {sellerError && <s-banner tone="critical">{sellerError}</s-banner>}
+              {sellerResults.length > 0 && (
                 <s-stack direction="block" gap="base">
-                  <s-stack direction="inline" gap="base">
-                    {item.image && (
-                      <img
-                        src={item.image}
-                        alt={item.productTitle}
-                        style={{ maxWidth: 70, borderRadius: 8 }}
-                      />
-                    )}
-                    <s-stack direction="block" gap="base">
-                      <s-text>{item.productTitle}</s-text>
-                      <s-text>{item.variantTitle}</s-text>
-                      <s-text>{item.sku || "SKU não informado"}</s-text>
-                      <s-text-field
-                        label="Valor unitário"
-                        value={item.displayPrice}
-                        onInput={(event: any) =>
-                          setOrderItems((current) =>
-                            current.map((currentItem) =>
-                              currentItem.localId === item.localId
-                                ? { ...currentItem, displayPrice: event.target.value || "0" }
-                                : currentItem,
-                            ),
-                          )
-                        }
-                      />
-                    </s-stack>
-                  </s-stack>
-
-                  <s-stack direction="inline" gap="base">
-                    <s-button onClick={() => adjustQuantity(item.localId, -1)}>-</s-button>
-                    <s-text>{item.quantity}</s-text>
-                    <s-button onClick={() => adjustQuantity(item.localId, 1)}>+</s-button>
-                    <s-button variant="tertiary" onClick={() => removeItem(item.localId)}>
-                      Remover
-                    </s-button>
-                  </s-stack>
-
-                  <s-heading>Personalização</s-heading>
-                  {Array.from({ length: item.quantity }, (_, index) => (
-                    <s-text-field
-                      key={`${item.localId}-${index}`}
-                      label={`Unidade ${index + 1}`}
-                      value={item.engravings[index] || ""}
-                      onInput={(event: any) =>
-                        updateEngraving(item.localId, index, event.target.value || "")
-                      }
-                    />
+                  {sellerResults.map((seller) => (
+                    <s-box
+                      key={seller.id}
+                      padding="base"
+                      borderWidth="base"
+                      borderRadius="base"
+                    >
+                      <s-stack direction="block" gap="base">
+                        <s-text>{seller.name}</s-text>
+                        <s-button onClick={() => setSelectedSeller(seller)}>
+                          Selecionar
+                        </s-button>
+                      </s-stack>
+                    </s-box>
                   ))}
                 </s-stack>
-              </s-box>
-            ))
+              )}
+              {sellerQuery.trim() && !sellerLoading && sellerResults.length === 0 && (
+                <s-button onClick={createSeller}>
+                  + Criar vendedor "{sellerQuery.trim()}"
+                </s-button>
+              )}
+            </>
+          ) : (
+            <s-box padding="base" borderWidth="base" borderRadius="base">
+              <s-stack direction="block" gap="base">
+                <s-text>{selectedSeller.name}</s-text>
+                <s-button variant="tertiary" onClick={() => setSelectedSeller(null)}>
+                  Trocar vendedor
+                </s-button>
+              </s-stack>
+            </s-box>
           )}
         </s-stack>
       </s-section>
@@ -643,6 +675,86 @@ export default function Index() {
       </s-section>
 
       <s-section>
+        <s-stack direction="block" gap="base">
+          <s-heading>Produtos</s-heading>
+          <s-text-field
+            label="Buscar produto"
+            value={productQuery}
+            onInput={(event: any) => setProductQuery(event.target.value || "")}
+          />
+          {productLoading && <s-paragraph>Buscando produtos…</s-paragraph>}
+          {productResults.length > 0 && (
+            <s-stack direction="block" gap="base">
+              {productResults.map((product) => (
+                <s-box key={product.id} padding="base" borderWidth="base" borderRadius="base">
+                  <s-stack direction="block" gap="base">
+                    {product.image && (
+                      <img src={product.image} alt={product.productTitle} style={{ maxWidth: 80, borderRadius: 8 }} />
+                    )}
+                    <s-text>{product.productTitle}</s-text>
+                    <s-text>{product.variantTitle}</s-text>
+                    <s-text>SKU: {product.sku || "—"}</s-text>
+                    <s-text>{formatPrice(product.price)}</s-text>
+                    <s-button onClick={() => addProduct(product)}>Adicionar</s-button>
+                  </s-stack>
+                </s-box>
+              ))}
+            </s-stack>
+          )}
+        </s-stack>
+      </s-section>
+
+      <s-section>
+        <s-stack direction="block" gap="base">
+          <s-heading>Produtos do pedido</s-heading>
+          {orderItems.length === 0 ? (
+            <s-paragraph>Nenhum produto adicionado.</s-paragraph>
+          ) : (
+            orderItems.map((item) => (
+              <s-box key={item.localId} padding="base" borderWidth="base" borderRadius="base">
+                <s-stack direction="block" gap="base">
+                  <s-stack direction="inline" gap="base">
+                    {item.image && <img src={item.image} alt={item.productTitle} style={{ maxWidth: 70, borderRadius: 8 }} />}
+                    <s-stack direction="block" gap="base">
+                      <s-text>{item.productTitle}</s-text>
+                      <s-text>{item.variantTitle}</s-text>
+                      <s-text>{item.sku || "SKU não informado"}</s-text>
+                      <s-text-field
+                        label="Valor unitário"
+                        value={item.displayPrice}
+                        onInput={(event: any) =>
+                          setOrderItems((current) => current.map((currentItem) =>
+                            currentItem.localId === item.localId
+                              ? { ...currentItem, displayPrice: event.target.value || "0" }
+                              : currentItem,
+                          ))
+                        }
+                      />
+                    </s-stack>
+                  </s-stack>
+                  <s-stack direction="inline" gap="base">
+                    <s-button onClick={() => adjustQuantity(item.localId, -1)}>-</s-button>
+                    <s-text>{item.quantity}</s-text>
+                    <s-button onClick={() => adjustQuantity(item.localId, 1)}>+</s-button>
+                    <s-button variant="tertiary" onClick={() => removeItem(item.localId)}>Remover</s-button>
+                  </s-stack>
+                  <s-heading>Personalização</s-heading>
+                  {Array.from({ length: item.quantity }, (_, index) => (
+                    <s-text-field
+                      key={`${item.localId}-${index}`}
+                      label={`Unidade ${index + 1}`}
+                      value={item.engravings[index] || ""}
+                      onInput={(event: any) => updateEngraving(item.localId, index, event.target.value || "")}
+                    />
+                  ))}
+                </s-stack>
+              </s-box>
+            ))
+          )}
+        </s-stack>
+      </s-section>
+
+      <s-section>
         <s-heading>Observações (Opcional)</s-heading>
         <s-text-field
           value={note}
@@ -654,7 +766,7 @@ export default function Index() {
         <s-stack direction="block" gap="base">
           <s-heading>Resumo do pedido</s-heading>
           <s-text>Cliente: {selectedCustomer ? selectedCustomer.name : "Guest checkout"}</s-text>
-          <s-text>Vendedor: Shopify staff autenticado</s-text>
+          <s-text>Vendedor: {selectedSeller?.name || "Não selecionado"}</s-text>
           <s-text>Subtotal dos produtos: {formatPrice(subtotal)}</s-text>
           <s-text>Frete: calculado no checkout</s-text>
           {error && <s-banner tone="critical">{error}</s-banner>}
