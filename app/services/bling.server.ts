@@ -3,6 +3,8 @@ import type { BlingOrderSync, BlingOrderSyncStatus } from "@prisma/client";
 
 const blingApiBaseUrl =
   process.env.BLING_API_BASE_URL || "https://api.bling.com.br/Api/v3";
+const blingTokenUrl =
+  process.env.BLING_TOKEN_URL || "https://www.bling.com.br/Api/v3/oauth/token";
 
 export type BlingOrder = {
   id: number | string;
@@ -12,16 +14,64 @@ export type BlingOrder = {
   [key: string]: unknown;
 };
 
+let cachedBlingToken = process.env.BLING_ACCESS_TOKEN;
+
 const getBlingToken = () => {
-  const token = process.env.BLING_ACCESS_TOKEN;
+  const token = cachedBlingToken;
   if (!token) {
     throw new Error("BLING_ACCESS_TOKEN não configurado.");
   }
   return token;
 };
 
+async function refreshBlingToken() {
+  const clientId = process.env.BLING_CLIENT_ID;
+  const clientSecret = process.env.BLING_CLIENT_SECRET;
+  const refreshToken = process.env.BLING_REFRESH_TOKEN;
+
+  if (!clientId || !clientSecret || !refreshToken) {
+    throw new Error(
+      "Token Bling expirado. Configure BLING_CLIENT_ID, BLING_CLIENT_SECRET e BLING_REFRESH_TOKEN.",
+    );
+  }
+
+  const response = await fetch(blingTokenUrl, {
+    method: "POST",
+    headers: {
+      Accept: "application/json",
+      "Content-Type": "application/x-www-form-urlencoded",
+      Authorization: `Basic ${Buffer.from(`${clientId}:${clientSecret}`).toString("base64")}`,
+    },
+    body: new URLSearchParams({
+      grant_type: "refresh_token",
+      refresh_token: refreshToken,
+    }),
+  });
+  const payload = (await response.json()) as {
+    access_token?: string;
+    refresh_token?: string;
+    error?: string;
+    error_description?: string;
+  };
+
+  if (!response.ok || !payload.access_token) {
+    throw new Error(
+      `Não foi possível renovar o token Bling: ${payload.error_description || payload.error || `HTTP ${response.status}`}`,
+    );
+  }
+
+  cachedBlingToken = payload.access_token;
+  console.log("[bling] Access token renovado com sucesso");
+
+  if (payload.refresh_token && payload.refresh_token !== refreshToken) {
+    console.warn(
+      "[bling] O Bling retornou um novo refresh token. Atualize BLING_REFRESH_TOKEN no Render.",
+    );
+  }
+}
+
 const blingRequest = async <T>(path: string, init?: RequestInit): Promise<T> => {
-  const response = await fetch(`${blingApiBaseUrl}${path}`, {
+  let response = await fetch(`${blingApiBaseUrl}${path}`, {
     ...init,
     headers: {
       Accept: "application/json",
@@ -30,6 +80,19 @@ const blingRequest = async <T>(path: string, init?: RequestInit): Promise<T> => 
       ...init?.headers,
     },
   });
+
+  if (response.status === 401 && process.env.BLING_REFRESH_TOKEN) {
+    await refreshBlingToken();
+    response = await fetch(`${blingApiBaseUrl}${path}`, {
+      ...init,
+      headers: {
+        Accept: "application/json",
+        Authorization: `Bearer ${getBlingToken()}`,
+        ...(init?.body ? { "Content-Type": "application/json" } : {}),
+        ...init?.headers,
+      },
+    });
+  }
 
   const body = await response.text();
   let payload: unknown = null;
