@@ -39,11 +39,21 @@ The internal order screen requires a local seller from the `Seller` table. The s
 Configure these server environment variables for Bling:
 
 ```text
-BLING_API_BASE_URL=https://api.bling.com.br/Api/v3
-BLING_ACCESS_TOKEN=...
+BLING_API_URL=https://api.bling.com.br/Api/v3
+BLING_CLIENT_ID=...
+BLING_CLIENT_SECRET=...
+BLING_REDIRECT_URI=https://facascastelsales.onrender.com/api/bling/callback
 BLING_ORDER_UPDATE_METHOD=PUT
 BLING_RETRY_SECRET=...
 ```
+
+Authorize the Bling integration once after deployment by opening:
+
+```text
+https://facascastelsales.onrender.com/api/bling/auth
+```
+
+The callback exchanges the authorization code server-side and stores the access and refresh tokens in `BlingOAuthToken`. Tokens are refreshed automatically before expiration and once after a `401`; they must not be configured as Render environment variables.
 
 The SQLite database must use persistent storage in Render. Add a Render Persistent Disk mounted at `/var/data` and configure:
 

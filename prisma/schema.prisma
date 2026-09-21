@@ -66,3 +66,19 @@ model BlingOrderSync {
   @@unique([shopDomain, shopifyOrderId])
   @@index([status, updatedAt])
 }
+
+model BlingOAuthToken {
+  id           String   @id
+  accessToken  String
+  refreshToken String
+  expiresAt    DateTime
+  scope        String?
+  createdAt    DateTime @default(now())
+  updatedAt    DateTime @updatedAt
+}
+
+model BlingOAuthState {
+  state     String   @id
+  expiresAt DateTime
+  createdAt DateTime @default(now())
+}

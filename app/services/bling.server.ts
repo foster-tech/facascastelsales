@@ -1,10 +1,17 @@
 import db from "../db.server";
 import type { BlingOrderSync, BlingOrderSyncStatus } from "@prisma/client";
 
-const blingApiBaseUrl =
-  process.env.BLING_API_BASE_URL || "https://api.bling.com.br/Api/v3";
-const blingTokenUrl =
-  process.env.BLING_TOKEN_URL || "https://www.bling.com.br/Api/v3/oauth/token";
+const blingApiBaseUrl = process.env.BLING_API_URL || "https://api.bling.com.br/Api/v3";
+const blingTokenUrl = `${blingApiBaseUrl}/oauth/token`;
+const blingTokenId = "default";
+const tokenSafetyMarginMs = 5 * 60 * 1000;
+
+type BlingTokenPayload = {
+  access_token: string;
+  refresh_token: string;
+  expires_in: number;
+  scope?: string;
+};
 
 export type BlingOrder = {
   id: number | string;
@@ -14,84 +21,189 @@ export type BlingOrder = {
   [key: string]: unknown;
 };
 
-let cachedBlingToken = process.env.BLING_ACCESS_TOKEN;
-
-const getBlingToken = () => {
-  const token = cachedBlingToken;
-  if (!token) {
-    throw new Error("BLING_ACCESS_TOKEN não configurado.");
+const describeBlingError = (value: unknown) => {
+  if (typeof value === "string" && value.trim()) {
+    return value;
   }
-  return token;
+
+  if (value && typeof value === "object") {
+    try {
+      return JSON.stringify(value);
+    } catch {
+      return "Resposta de erro não serializável";
+    }
+  }
+
+  return "Resposta de erro vazia";
 };
 
-async function refreshBlingToken() {
+const getBlingCredentials = () => {
   const clientId = process.env.BLING_CLIENT_ID;
   const clientSecret = process.env.BLING_CLIENT_SECRET;
-  const refreshToken = process.env.BLING_REFRESH_TOKEN;
 
-  if (!clientId || !clientSecret || !refreshToken) {
-    throw new Error(
-      "Token Bling expirado. Configure BLING_CLIENT_ID, BLING_CLIENT_SECRET e BLING_REFRESH_TOKEN.",
-    );
+  if (!clientId || !clientSecret) {
+    throw new Error("Configure BLING_CLIENT_ID e BLING_CLIENT_SECRET.");
   }
 
+  return { clientId, clientSecret };
+};
+
+let refreshPromise: Promise<string> | null = null;
+
+async function requestBlingToken(body: URLSearchParams) {
+  const { clientId, clientSecret } = getBlingCredentials();
   const response = await fetch(blingTokenUrl, {
     method: "POST",
     headers: {
-      Accept: "application/json",
+      Accept: "1.0",
       "Content-Type": "application/x-www-form-urlencoded",
       Authorization: `Basic ${Buffer.from(`${clientId}:${clientSecret}`).toString("base64")}`,
+      "enable-jwt": "1",
     },
-    body: new URLSearchParams({
-      grant_type: "refresh_token",
-      refresh_token: refreshToken,
-    }),
+    body,
   });
-  const payload = (await response.json()) as {
+  const responseBody = await response.text();
+  let payload: {
     access_token?: string;
     refresh_token?: string;
-    error?: string;
-    error_description?: string;
-  };
+    expires_in?: number;
+    scope?: string;
+    error?: unknown;
+    error_description?: unknown;
+  } = {};
+
+  try {
+    payload = JSON.parse(responseBody) as typeof payload;
+  } catch {
+    throw new Error(
+      `Não foi possível renovar o token Bling: ${responseBody || `HTTP ${response.status}`}`,
+    );
+  }
 
   if (!response.ok || !payload.access_token) {
     throw new Error(
-      `Não foi possível renovar o token Bling: ${payload.error_description || payload.error || `HTTP ${response.status}`}`,
+      `Não foi possível renovar o token Bling: ${describeBlingError(payload.error_description || payload.error || `HTTP ${response.status}`)}`,
     );
   }
 
-  cachedBlingToken = payload.access_token;
-  console.log("[bling] Access token renovado com sucesso");
+  if (!payload.refresh_token || !payload.expires_in) {
+    throw new Error("Resposta OAuth do Bling não contém refresh_token ou expires_in.");
+  }
 
-  if (payload.refresh_token && payload.refresh_token !== refreshToken) {
-    console.warn(
-      "[bling] O Bling retornou um novo refresh token. Atualize BLING_REFRESH_TOKEN no Render.",
+  return {
+    access_token: payload.access_token,
+    refresh_token: payload.refresh_token,
+    expires_in: payload.expires_in,
+    scope: payload.scope,
+  } satisfies BlingTokenPayload;
+}
+
+async function persistBlingToken(payload: {
+  access_token: string;
+  refresh_token: string;
+  expires_in: number;
+  scope?: string;
+}) {
+  return db.blingOAuthToken.upsert({
+    where: { id: blingTokenId },
+    create: {
+      id: blingTokenId,
+      accessToken: payload.access_token,
+      refreshToken: payload.refresh_token,
+      expiresAt: new Date(Date.now() + payload.expires_in * 1000),
+      scope: payload.scope || null,
+    },
+    update: {
+      accessToken: payload.access_token,
+      refreshToken: payload.refresh_token,
+      expiresAt: new Date(Date.now() + payload.expires_in * 1000),
+      scope: payload.scope || null,
+    },
+  });
+}
+
+export async function exchangeBlingAuthorizationCode(code: string) {
+  const redirectUri = process.env.BLING_REDIRECT_URI;
+  if (!redirectUri) {
+    throw new Error("Configure BLING_REDIRECT_URI.");
+  }
+
+  const payload = await requestBlingToken(
+    new URLSearchParams({
+      grant_type: "authorization_code",
+      code,
+      redirect_uri: redirectUri,
+    }),
+  );
+  await persistBlingToken(payload);
+}
+
+export async function getValidBlingAccessToken(forceRefresh = false, failedToken?: string) {
+  const stored = await db.blingOAuthToken.findUnique({ where: { id: blingTokenId } });
+  if (!stored) {
+    throw new Error("Bling ainda não foi autorizado. Acesse /api/bling/auth.");
+  }
+
+  const tokenIsValid = stored.expiresAt.getTime() - Date.now() > tokenSafetyMarginMs;
+  if (!forceRefresh && tokenIsValid) {
+    return stored.accessToken;
+  }
+
+  if (forceRefresh && failedToken && stored.accessToken !== failedToken && tokenIsValid) {
+    return stored.accessToken;
+  }
+
+  if (refreshPromise) {
+    return refreshPromise;
+  }
+
+  refreshPromise = (async () => {
+    console.log("[bling-oauth] Refreshing token");
+    const latest = await db.blingOAuthToken.findUnique({ where: { id: blingTokenId } });
+    if (!latest) {
+      throw new Error("Bling ainda não foi autorizado. Acesse /api/bling/auth.");
+    }
+
+    if (failedToken && latest.accessToken !== failedToken && latest.expiresAt.getTime() - Date.now() > tokenSafetyMarginMs) {
+      return latest.accessToken;
+    }
+
+    const payload = await requestBlingToken(
+      new URLSearchParams({
+        grant_type: "refresh_token",
+        refresh_token: latest.refreshToken,
+      }),
     );
+    await persistBlingToken(payload);
+    console.log("[bling-oauth] Token refreshed successfully");
+    return payload.access_token;
+  })();
+
+  try {
+    return await refreshPromise;
+  } finally {
+    refreshPromise = null;
   }
 }
 
-const blingRequest = async <T>(path: string, init?: RequestInit): Promise<T> => {
-  let response = await fetch(`${blingApiBaseUrl}${path}`, {
+const blingFetch = async <T>(path: string, init?: RequestInit): Promise<T> => {
+  const request = async (token: string) => fetch(`${blingApiBaseUrl}${path}`, {
     ...init,
     headers: {
       Accept: "application/json",
-      Authorization: `Bearer ${getBlingToken()}`,
+      Authorization: `Bearer ${token}`,
+      "enable-jwt": "1",
       ...(init?.body ? { "Content-Type": "application/json" } : {}),
       ...init?.headers,
     },
   });
 
-  if (response.status === 401 && process.env.BLING_REFRESH_TOKEN) {
-    await refreshBlingToken();
-    response = await fetch(`${blingApiBaseUrl}${path}`, {
-      ...init,
-      headers: {
-        Accept: "application/json",
-        Authorization: `Bearer ${getBlingToken()}`,
-        ...(init?.body ? { "Content-Type": "application/json" } : {}),
-        ...init?.headers,
-      },
-    });
+  let token = await getValidBlingAccessToken();
+  let response = await request(token);
+
+  if (response.status === 401) {
+    token = await getValidBlingAccessToken(true, token);
+    response = await request(token);
   }
 
   const body = await response.text();
@@ -118,7 +230,7 @@ export async function findBlingOrderByShopifyOrder(
 ): Promise<BlingOrder | null> {
   for (let page = 1; page <= 5; page += 1) {
     const params = new URLSearchParams({ pagina: String(page), limite: "100" });
-    const payload = await blingRequest<{ data?: BlingOrder[] }>(
+    const payload = await blingFetch<{ data?: BlingOrder[] }>(
       `/pedidos/vendas?${params.toString()}`,
     );
     const order = (payload.data || []).find((candidate) => {
@@ -127,7 +239,7 @@ export async function findBlingOrderByShopifyOrder(
     });
 
     if (order) {
-      return blingRequest<BlingOrder>(`/pedidos/vendas/${order.id}`);
+      return blingFetch<BlingOrder>(`/pedidos/vendas/${order.id}`);
     }
 
     if (!payload.data || payload.data.length < 100) {
@@ -149,7 +261,7 @@ export async function updateBlingOrderSeller(
   };
   const method = process.env.BLING_ORDER_UPDATE_METHOD || "PUT";
 
-  return blingRequest<BlingOrder>(`/pedidos/vendas/${order.id}`, {
+  return blingFetch<BlingOrder>(`/pedidos/vendas/${order.id}`, {
     method,
     body: JSON.stringify(payload),
   });
