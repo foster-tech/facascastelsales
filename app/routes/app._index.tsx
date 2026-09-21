@@ -226,6 +226,24 @@ export default function Index() {
   const [success, setSuccess] = useState<{ name: string; invoiceUrl: string } | null>(null);
   const [isCreating, setIsCreating] = useState(false);
   const draftOrderFetcher = useFetcher<any>();
+  const sellerFetcher = useFetcher<any>();
+
+  useEffect(() => {
+    if (sellerFetcher.state !== "idle" || !sellerFetcher.data) {
+      return;
+    }
+
+    const result = sellerFetcher.data;
+    if (!result.success || !result.seller?.id) {
+      setSellerError(result.message || "Não foi possível criar o vendedor.");
+      return;
+    }
+
+    setSelectedSeller(result.seller);
+    setSellerQuery("");
+    setSellerResults([]);
+    setSellerError("");
+  }, [sellerFetcher.data, sellerFetcher.state]);
 
   useEffect(() => {
     const timeout = window.setTimeout(async () => {
@@ -453,35 +471,22 @@ export default function Index() {
     }
   };
 
-  const createSeller = async () => {
+  const createSeller = () => {
     const name = sellerQuery.trim();
     if (!name) {
       setSellerError("Informe o nome do vendedor.");
       return;
     }
 
-    try {
-      const response = await fetch(window.location.href, {
-        method: "POST",
-        credentials: "include",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ mode: "seller-create", name }),
-      });
-      const result = await parseJsonResponse(response);
-      if (!response.ok || !result?.seller?.id) {
-        throw new Error(result?.message || "Não foi possível criar o vendedor.");
-      }
-
-      setSelectedSeller(result.seller);
-      setSellerQuery("");
-      setSellerResults([]);
-    } catch (sellerErrorMessage) {
-      setSellerError(
-        sellerErrorMessage instanceof Error
-          ? sellerErrorMessage.message
-          : "Não foi possível criar o vendedor.",
-      );
-    }
+    setSellerError("");
+    sellerFetcher.submit(
+      JSON.stringify({ name }),
+      {
+        method: "post",
+        action: `/api/sellers${window.location.search}`,
+        encType: "application/json",
+      },
+    );
   };
 
   const handleCreateDraftOrder = async () => {
@@ -549,8 +554,13 @@ export default function Index() {
                 </s-stack>
               )}
               {sellerQuery.trim() && !sellerLoading && sellerResults.length === 0 && (
-                <s-button onClick={createSeller}>
-                  + Criar vendedor "{sellerQuery.trim()}"
+                <s-button
+                  disabled={sellerFetcher.state !== "idle"}
+                  onClick={createSeller}
+                >
+                  {sellerFetcher.state === "submitting"
+                    ? "Criando vendedor…"
+                    : `+ Criar vendedor "${sellerQuery.trim()}"`}
                 </s-button>
               )}
             </>
