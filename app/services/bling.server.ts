@@ -16,10 +16,17 @@ type BlingTokenPayload = {
 
 export type BlingOrder = {
   id: number | string;
+  numero?: number;
   numeroLoja?: string | null;
   loja?: unknown;
   vendedor?: unknown;
   [key: string]: unknown;
+};
+
+type BlingOrderSearchResult = {
+  id: number | string;
+  numero?: number;
+  numeroLoja?: string;
 };
 
 export class BlingRateLimitError extends Error {
@@ -278,27 +285,92 @@ const blingFetch = async <T>(path: string, init?: RequestInit): Promise<T> => {
 export async function findBlingOrderByShopifyOrder(
   shopifyOrderId: string,
   shopifyOrderName: string,
-): Promise<BlingOrder | null> {
+): Promise<BlingOrderSearchResult | null> {
+  const shopifyOrderNumber = shopifyOrderName.replace(/^#/, "");
+  console.log("[bling] Looking for Shopify order:", {
+    shopifyOrderId,
+    shopifyOrderName,
+    shopifyOrderNumber,
+  });
+
   for (let page = 1; page <= 5; page += 1) {
     const params = new URLSearchParams({ pagina: String(page), limite: "100" });
-    const payload = await blingFetch<{ data?: BlingOrder[] }>(
+    const response = await blingFetch<{ data?: unknown }>(
       `/pedidos/vendas?${params.toString()}`,
     );
-    const order = (payload.data || []).find((candidate) => {
-      const externalNumber = String(candidate.numeroLoja || "");
-      return externalNumber === shopifyOrderId || externalNumber === shopifyOrderName;
+    const orders = Array.isArray(response?.data) ? response.data : [];
+
+    console.log("[bling] Search response structure:", {
+      hasData: Boolean(response?.data),
+      isDataArray: Array.isArray(response?.data),
+      count: Array.isArray(response?.data) ? response.data.length : undefined,
     });
 
-    if (order) {
-      return blingFetch<BlingOrder>(`/pedidos/vendas/${order.id}`);
+    if (orders[0]) {
+      console.log("[bling] First order search result:", orders[0]);
     }
 
-    if (!payload.data || payload.data.length < 100) {
+    const order = orders.find((candidate) => {
+      if (!candidate || typeof candidate !== "object") {
+        return false;
+      }
+
+      const item = candidate as Partial<BlingOrder>;
+      console.log("[bling] Candidate:", {
+        id: item.id,
+        numero: item.numero,
+        numeroLoja: item.numeroLoja,
+      });
+
+      const externalNumber = String(item.numeroLoja || "");
+      return externalNumber === shopifyOrderId
+        || externalNumber === shopifyOrderName
+        || externalNumber === shopifyOrderNumber;
+    });
+
+    if (order && typeof order === "object") {
+      const item = order as Partial<BlingOrder>;
+      const hasValidId = (typeof item.id === "number" && Number.isFinite(item.id))
+        || (typeof item.id === "string" && item.id.trim().length > 0);
+
+      if (!hasValidId) {
+        console.log("[bling] Order not found or response without id");
+        return null;
+      }
+
+      return {
+        id: typeof item.id === "string" ? item.id.trim() : item.id,
+        ...(typeof item.numero === "number" ? { numero: item.numero } : {}),
+        ...(typeof item.numeroLoja === "string" ? { numeroLoja: item.numeroLoja } : {}),
+      };
+    }
+
+    if (orders.length < 100) {
       break;
     }
   }
 
   return null;
+}
+
+async function getBlingOrderDetails(orderId: BlingOrderSearchResult["id"]): Promise<BlingOrder | null> {
+  const response = await blingFetch<{ data?: unknown }>(`/pedidos/vendas/${orderId}`);
+  const order = response?.data && typeof response.data === "object" ? response.data : response;
+
+  if (!order || typeof order !== "object") {
+    console.log("[bling] Order not found or response without id");
+    return null;
+  }
+
+  const item = order as Partial<BlingOrder>;
+  const hasValidId = (typeof item.id === "number" && Number.isFinite(item.id))
+    || (typeof item.id === "string" && item.id.trim().length > 0);
+  if (!hasValidId) {
+    console.log("[bling] Order not found or response without id");
+    return null;
+  }
+
+  return item as BlingOrder;
 }
 
 export async function updateBlingOrderSeller(
@@ -328,8 +400,8 @@ export async function processBlingOrderSync(sync: BlingOrderSync) {
     sync.shopifyOrderName,
   );
 
-  if (!blingOrder) {
-    console.log(`[bling] Shopify order not imported yet: ${sync.shopifyOrderName}`);
+  if (!blingOrder || !blingOrder.id) {
+    console.log(`[bling] Shopify order ${sync.shopifyOrderName} not imported/found yet`);
     return db.blingOrderSync.update({
       where: { id: sync.id },
       data: {
@@ -340,16 +412,29 @@ export async function processBlingOrderSync(sync: BlingOrderSync) {
     });
   }
 
-  console.log(`[bling] Order found: ${blingOrder.id}`);
+  const blingOrderDetails = await getBlingOrderDetails(blingOrder.id);
+  if (!blingOrderDetails || !blingOrderDetails.id) {
+    console.log(`[bling] Shopify order ${sync.shopifyOrderName} not imported/found yet`);
+    return db.blingOrderSync.update({
+      where: { id: sync.id },
+      data: {
+        status: "PENDING",
+        attempts: { increment: 1 },
+        lastError: "Pedido encontrado no Bling sem ID v\u00e1lido.",
+      },
+    });
+  }
+
+  console.log(`[bling] Order found: ${blingOrderDetails.id}`);
   console.log(`[bling] Setting seller: ${sync.sellerName}`);
   console.log("[bling] Setting store: Nenhuma (loja omitida do payload)");
-  await updateBlingOrderSeller(blingOrder, sync.sellerName);
+  await updateBlingOrderSeller(blingOrderDetails, sync.sellerName);
   console.log("[bling] Order synchronized successfully");
 
   return db.blingOrderSync.update({
     where: { id: sync.id },
     data: {
-      blingOrderId: String(blingOrder.id),
+      blingOrderId: String(blingOrderDetails.id),
       status: "SYNCED",
       attempts: { increment: 1 },
       lastError: null,
