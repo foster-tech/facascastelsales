@@ -5,6 +5,7 @@ const blingApiBaseUrl = process.env.BLING_API_URL || "https://api.bling.com.br/A
 const blingTokenUrl = `${blingApiBaseUrl}/oauth/token`;
 const blingTokenId = "default";
 const tokenSafetyMarginMs = 5 * 60 * 1000;
+const blingRequestIntervalMs = 400;
 
 type BlingTokenPayload = {
   access_token: string;
@@ -20,6 +21,13 @@ export type BlingOrder = {
   vendedor?: unknown;
   [key: string]: unknown;
 };
+
+export class BlingRateLimitError extends Error {
+  constructor(message: string) {
+    super(message);
+    this.name = "BlingRateLimitError";
+  }
+}
 
 const describeBlingError = (value: unknown) => {
   if (typeof value === "string" && value.trim()) {
@@ -49,6 +57,27 @@ const getBlingCredentials = () => {
 };
 
 let refreshPromise: Promise<string> | null = null;
+let requestQueue = Promise.resolve();
+let lastBlingRequestAt = 0;
+
+const waitForBlingRequestSlot = async () => {
+  const previousRequest = requestQueue;
+  let releaseQueue!: () => void;
+  requestQueue = new Promise<void>((resolve) => {
+    releaseQueue = resolve;
+  });
+
+  await previousRequest;
+  const waitMs = Math.max(
+    0,
+    blingRequestIntervalMs - (Date.now() - lastBlingRequestAt),
+  );
+  if (waitMs > 0) {
+    await new Promise((resolve) => setTimeout(resolve, waitMs));
+  }
+  lastBlingRequestAt = Date.now();
+  releaseQueue();
+};
 
 async function requestBlingToken(body: URLSearchParams) {
   const { clientId, clientSecret } = getBlingCredentials();
@@ -198,12 +227,30 @@ const blingFetch = async <T>(path: string, init?: RequestInit): Promise<T> => {
     },
   });
 
+  const executeRequest = async (token: string) => {
+    await waitForBlingRequestSlot();
+    return request(token);
+  };
+
   let token = await getValidBlingAccessToken();
-  let response = await request(token);
+  let response = await executeRequest(token);
 
   if (response.status === 401) {
     token = await getValidBlingAccessToken(true, token);
-    response = await request(token);
+    response = await executeRequest(token);
+  }
+
+  if (response.status === 429) {
+    const retryAfterHeader = response.headers.get("retry-after");
+    const retryAfterSeconds = Number(retryAfterHeader || 1);
+    const retryAfterMs = Math.min(
+      5000,
+      Math.max(400, Number.isFinite(retryAfterSeconds) ? retryAfterSeconds * 1000 : 1000),
+    );
+
+    console.warn(`[bling] Rate limit atingido; retry em ${retryAfterMs}ms`);
+    await new Promise((resolve) => setTimeout(resolve, retryAfterMs));
+    response = await executeRequest(token);
   }
 
   const body = await response.text();
@@ -218,7 +265,11 @@ const blingFetch = async <T>(path: string, init?: RequestInit): Promise<T> => {
   }
 
   if (!response.ok) {
-    throw new Error(`Bling respondeu ${response.status}: ${JSON.stringify(payload)}`);
+    const message = `Bling respondeu ${response.status}: ${JSON.stringify(payload)}`;
+    if (response.status === 429) {
+      throw new BlingRateLimitError(message);
+    }
+    throw new Error(message);
   }
 
   return payload as T;

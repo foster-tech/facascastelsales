@@ -3,6 +3,7 @@ import { authenticate } from "../shopify.server";
 import db from "../db.server";
 import { normalizeSellerName } from "../services/sellers.server";
 import {
+  BlingRateLimitError,
   markBlingOrderSyncFailed,
   processBlingOrderSync,
 } from "../services/bling.server";
@@ -157,7 +158,18 @@ export const action = async ({ request }: ActionFunctionArgs) => {
     }
   } catch (error) {
     console.error(`[orders/paid] Falha ao sincronizar ${shopifyOrderName}`, error);
-    await markBlingOrderSyncFailed(sync.id, error);
+    if (error instanceof BlingRateLimitError) {
+      await db.blingOrderSync.update({
+        where: { id: sync.id },
+        data: {
+          status: "PENDING",
+          attempts: { increment: 1 },
+          lastError: error.message,
+        },
+      });
+    } else {
+      await markBlingOrderSyncFailed(sync.id, error);
+    }
   }
 
   return new Response();
