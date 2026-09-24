@@ -330,19 +330,24 @@ export async function findBlingOrderByShopifyOrder(
 
     if (order && typeof order === "object") {
       const item = order as Partial<BlingOrder>;
-      const hasValidId = (typeof item.id === "number" && Number.isFinite(item.id))
-        || (typeof item.id === "string" && item.id.trim().length > 0);
-
-      if (!hasValidId) {
-        console.log("[bling] Order not found or response without id");
-        return null;
+      if (typeof item.id === "string" && item.id.trim().length > 0) {
+        return {
+          id: item.id.trim(),
+          ...(typeof item.numero === "number" ? { numero: item.numero } : {}),
+          ...(typeof item.numeroLoja === "string" ? { numeroLoja: item.numeroLoja } : {}),
+        };
       }
 
-      return {
-        id: typeof item.id === "string" ? item.id.trim() : item.id,
-        ...(typeof item.numero === "number" ? { numero: item.numero } : {}),
-        ...(typeof item.numeroLoja === "string" ? { numeroLoja: item.numeroLoja } : {}),
-      };
+      if (typeof item.id === "number" && Number.isFinite(item.id)) {
+        return {
+          id: item.id,
+          ...(typeof item.numero === "number" ? { numero: item.numero } : {}),
+          ...(typeof item.numeroLoja === "string" ? { numeroLoja: item.numeroLoja } : {}),
+        };
+      }
+
+      console.log("[bling] Order not found or response without id");
+      return null;
     }
 
     if (orders.length < 100) {

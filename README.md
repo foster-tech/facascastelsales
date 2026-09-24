@@ -55,13 +55,18 @@ https://facascastelsales.onrender.com/api/bling/auth
 
 The callback exchanges the authorization code server-side and stores the access and refresh tokens in `BlingOAuthToken`. Tokens are refreshed automatically before expiration and once after a `401`; they must not be configured as Render environment variables.
 
-The SQLite database must use persistent storage in Render. Add a Render Persistent Disk mounted at `/var/data` and configure:
+The application uses PostgreSQL on AWS RDS with IAM authentication. Configure these server environment variables:
 
 ```text
-DATABASE_URL=file:/var/data/dev.sqlite
+DATABASE_URL=postgresql://postgres@database-1-instance-1.copuwemw6prg.us-east-1.rds.amazonaws.com:5432/postgres?sslmode=require
+RDS_HOST=database-1-instance-1.copuwemw6prg.us-east-1.rds.amazonaws.com
+RDS_PORT=5432
+RDS_DATABASE=postgres
+RDS_USERNAME=postgres
+AWS_REGION=us-east-1
 ```
 
-Without a persistent disk or an external database, Render can delete `dev.sqlite` during a redeploy or restart, including all sellers and Shopify sessions. After configuring the disk, deploy once so `prisma migrate deploy` creates the tables there.
+The running service needs AWS credentials with `rds-db:connect` permission for the RDS database user. The client generates a new IAM token whenever PostgreSQL opens a connection, so no token is stored as an environment variable. `npm run setup` also creates an ephemeral token before invoking `prisma migrate deploy`; do not run migrations with a token committed in `DATABASE_URL`.
 
 The Bling update preserves the imported order and omits the `loja` field to represent no store, rather than sending the display label `Nenhuma`. Pending imports can be retried by an authorized scheduler with `POST /api/bling/retry` and the `x-bling-retry-secret` header.
 

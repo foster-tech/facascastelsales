@@ -3,8 +3,8 @@ CREATE TABLE "Seller" (
     "name" TEXT NOT NULL,
     "normalizedName" TEXT NOT NULL,
     "active" BOOLEAN NOT NULL DEFAULT true,
-    "createdAt" DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
-    "updatedAt" DATETIME NOT NULL
+    "createdAt" TIMESTAMP(3) NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    "updatedAt" TIMESTAMP(3) NOT NULL
 );
 
 CREATE UNIQUE INDEX "Seller_normalizedName_key" ON "Seller"("normalizedName");
@@ -21,8 +21,8 @@ CREATE TABLE "BlingOrderSync" (
     "status" TEXT NOT NULL DEFAULT 'PENDING',
     "attempts" INTEGER NOT NULL DEFAULT 0,
     "lastError" TEXT,
-    "createdAt" DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
-    "updatedAt" DATETIME NOT NULL
+    "createdAt" TIMESTAMP(3) NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    "updatedAt" TIMESTAMP(3) NOT NULL
 );
 
 CREATE UNIQUE INDEX "BlingOrderSync_shopDomain_shopifyOrderId_key"

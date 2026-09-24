@@ -11,7 +11,7 @@
     "env": "shopify app env",
     "start": "react-router-serve ./build/server/index.js",
     "docker-start": "npm run setup && npm run start",
-    "setup": "prisma generate && prisma migrate deploy",
+    "setup": "prisma generate && node ./scripts/migrate-rds.mjs",
     "lint": "eslint --ignore-path .gitignore --cache --cache-location ./node_modules/.cache/eslint .",
     "shopify": "shopify",
     "prisma": "prisma",
@@ -24,6 +24,8 @@
     "node": ">=20.19 <22 || >=22.12"
   },
   "dependencies": {
+    "@aws-sdk/rds-signer": "^3.1138.0",
+    "@prisma/adapter-pg": "^6.19.3",
     "@prisma/client": "^6.16.3",
     "@react-router/dev": "7.18.2",
     "@react-router/fs-routes": "7.18.2",
@@ -33,6 +35,7 @@
     "@shopify/shopify-app-react-router": "^1.2.1",
     "@shopify/shopify-app-session-storage-prisma": "^9.0.0",
     "isbot": "^5.1.31",
+    "pg": "^8.23.0",
     "prisma": "^6.16.3",
     "react": "^18.3.1",
     "react-dom": "^18.3.1",
