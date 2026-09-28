@@ -1,0 +1,381 @@
+{
+  "buildManifest": {
+    "serverBundles": {
+      "nodejs_eyJydW50aW1lIjoibm9kZWpzIn0": {
+        "id": "nodejs_eyJydW50aW1lIjoibm9kZWpzIn0",
+        "file": "build/server/nodejs_eyJydW50aW1lIjoibm9kZWpzIn0/index.js",
+        "config": {
+          "runtime": "nodejs"
+        }
+      }
+    },
+    "routeIdToServerBundleId": {
+      "routes/webhooks.app.scopes_update": "nodejs_eyJydW50aW1lIjoibm9kZWpzIn0",
+      "routes/webhooks.app.uninstalled": "nodejs_eyJydW50aW1lIjoibm9kZWpzIn0",
+      "routes/webhooks.orders.paid": "nodejs_eyJydW50aW1lIjoibm9kZWpzIn0",
+      "routes/api.bling.callback": "nodejs_eyJydW50aW1lIjoibm9kZWpzIn0",
+      "routes/api.bling.retry": "nodejs_eyJydW50aW1lIjoibm9kZWpzIn0",
+      "routes/api.bling.auth": "nodejs_eyJydW50aW1lIjoibm9kZWpzIn0",
+      "routes/api.customers": "nodejs_eyJydW50aW1lIjoibm9kZWpzIn0",
+      "routes/api.products": "nodejs_eyJydW50aW1lIjoibm9kZWpzIn0",
+      "routes/api.sellers": "nodejs_eyJydW50aW1lIjoibm9kZWpzIn0",
+      "routes/auth.login": "nodejs_eyJydW50aW1lIjoibm9kZWpzIn0",
+      "routes/auth.$": "nodejs_eyJydW50aW1lIjoibm9kZWpzIn0",
+      "routes/_index": "nodejs_eyJydW50aW1lIjoibm9kZWpzIn0",
+      "routes/app.additional": "nodejs_eyJydW50aW1lIjoibm9kZWpzIn0",
+      "routes/app._index": "nodejs_eyJydW50aW1lIjoibm9kZWpzIn0"
+    },
+    "routes": {
+      "root": {
+        "id": "root",
+        "file": "app/root.tsx",
+        "path": "",
+        "config": {}
+      },
+      "routes/webhooks.app.scopes_update": {
+        "id": "routes/webhooks.app.scopes_update",
+        "parentId": "root",
+        "file": "app/routes/webhooks.app.scopes_update.tsx",
+        "path": "webhooks/app/scopes_update",
+        "config": {
+          "runtime": "nodejs"
+        }
+      },
+      "routes/webhooks.app.uninstalled": {
+        "id": "routes/webhooks.app.uninstalled",
+        "parentId": "root",
+        "file": "app/routes/webhooks.app.uninstalled.tsx",
+        "path": "webhooks/app/uninstalled",
+        "config": {
+          "runtime": "nodejs"
+        }
+      },
+      "routes/webhooks.orders.paid": {
+        "id": "routes/webhooks.orders.paid",
+        "parentId": "root",
+        "file": "app/routes/webhooks.orders.paid.tsx",
+        "path": "webhooks/orders/paid",
+        "config": {
+          "runtime": "nodejs"
+        }
+      },
+      "routes/api.bling.callback": {
+        "id": "routes/api.bling.callback",
+        "parentId": "root",
+        "file": "app/routes/api.bling.callback.ts",
+        "path": "api/bling/callback",
+        "config": {
+          "runtime": "nodejs"
+        }
+      },
+      "routes/api.bling.retry": {
+        "id": "routes/api.bling.retry",
+        "parentId": "root",
+        "file": "app/routes/api.bling.retry.ts",
+        "path": "api/bling/retry",
+        "config": {
+          "runtime": "nodejs"
+        }
+      },
+      "routes/api.bling.auth": {
+        "id": "routes/api.bling.auth",
+        "parentId": "root",
+        "file": "app/routes/api.bling.auth.ts",
+        "path": "api/bling/auth",
+        "config": {
+          "runtime": "nodejs"
+        }
+      },
+      "routes/api.customers": {
+        "id": "routes/api.customers",
+        "parentId": "root",
+        "file": "app/routes/api.customers.ts",
+        "path": "api/customers",
+        "config": {
+          "runtime": "nodejs"
+        }
+      },
+      "routes/api.products": {
+        "id": "routes/api.products",
+        "parentId": "root",
+        "file": "app/routes/api.products.ts",
+        "path": "api/products",
+        "config": {
+          "runtime": "nodejs"
+        }
+      },
+      "routes/api.sellers": {
+        "id": "routes/api.sellers",
+        "parentId": "root",
+        "file": "app/routes/api.sellers.ts",
+        "path": "api/sellers",
+        "config": {
+          "runtime": "nodejs"
+        }
+      },
+      "routes/auth.login": {
+        "id": "routes/auth.login",
+        "parentId": "root",
+        "file": "app/routes/auth.login/route.tsx",
+        "path": "auth/login",
+        "config": {
+          "runtime": "nodejs"
+        }
+      },
+      "routes/auth.$": {
+        "id": "routes/auth.$",
+        "parentId": "root",
+        "file": "app/routes/auth.$.tsx",
+        "path": "auth/*",
+        "config": {
+          "runtime": "nodejs"
+        }
+      },
+      "routes/_index": {
+        "id": "routes/_index",
+        "parentId": "root",
+        "file": "app/routes/_index/route.tsx",
+        "index": true,
+        "config": {
+          "runtime": "nodejs"
+        }
+      },
+      "routes/app": {
+        "id": "routes/app",
+        "parentId": "root",
+        "file": "app/routes/app.tsx",
+        "path": "app",
+        "config": {}
+      },
+      "routes/app.additional": {
+        "id": "routes/app.additional",
+        "parentId": "routes/app",
+        "file": "app/routes/app.additional.tsx",
+        "path": "additional",
+        "config": {
+          "runtime": "nodejs"
+        }
+      },
+      "routes/app._index": {
+        "id": "routes/app._index",
+        "parentId": "routes/app",
+        "file": "app/routes/app._index.tsx",
+        "index": true,
+        "config": {
+          "runtime": "nodejs"
+        }
+      }
+    }
+  },
+  "reactRouterConfig": {
+    "appDirectory": "C:/Python/shopify/facas-castel-sales/app",
+    "basename": "/",
+    "buildDirectory": "C:/Python/shopify/facas-castel-sales/build",
+    "future": {
+      "unstable_optimizeDeps": false,
+      "v8_passThroughRequests": false,
+      "v8_trailingSlashAwareDataRequests": false,
+      "unstable_previewServerPrerendering": false,
+      "v8_middleware": false,
+      "v8_splitRouteModules": false,
+      "v8_viteEnvironmentApi": false
+    },
+    "routes": {
+      "root": {
+        "id": "root",
+        "file": "root.tsx",
+        "path": ""
+      },
+      "routes/webhooks.app.scopes_update": {
+        "id": "routes/webhooks.app.scopes_update",
+        "parentId": "root",
+        "file": "routes/webhooks.app.scopes_update.tsx",
+        "path": "webhooks/app/scopes_update"
+      },
+      "routes/webhooks.app.uninstalled": {
+        "id": "routes/webhooks.app.uninstalled",
+        "parentId": "root",
+        "file": "routes/webhooks.app.uninstalled.tsx",
+        "path": "webhooks/app/uninstalled"
+      },
+      "routes/webhooks.orders.paid": {
+        "id": "routes/webhooks.orders.paid",
+        "parentId": "root",
+        "file": "routes/webhooks.orders.paid.tsx",
+        "path": "webhooks/orders/paid"
+      },
+      "routes/api.bling.callback": {
+        "id": "routes/api.bling.callback",
+        "parentId": "root",
+        "file": "routes/api.bling.callback.ts",
+        "path": "api/bling/callback"
+      },
+      "routes/api.bling.retry": {
+        "id": "routes/api.bling.retry",
+        "parentId": "root",
+        "file": "routes/api.bling.retry.ts",
+        "path": "api/bling/retry"
+      },
+      "routes/api.bling.auth": {
+        "id": "routes/api.bling.auth",
+        "parentId": "root",
+        "file": "routes/api.bling.auth.ts",
+        "path": "api/bling/auth"
+      },
+      "routes/api.customers": {
+        "id": "routes/api.customers",
+        "parentId": "root",
+        "file": "routes/api.customers.ts",
+        "path": "api/customers"
+      },
+      "routes/api.products": {
+        "id": "routes/api.products",
+        "parentId": "root",
+        "file": "routes/api.products.ts",
+        "path": "api/products"
+      },
+      "routes/api.sellers": {
+        "id": "routes/api.sellers",
+        "parentId": "root",
+        "file": "routes/api.sellers.ts",
+        "path": "api/sellers"
+      },
+      "routes/auth.login": {
+        "id": "routes/auth.login",
+        "parentId": "root",
+        "file": "routes/auth.login/route.tsx",
+        "path": "auth/login"
+      },
+      "routes/auth.$": {
+        "id": "routes/auth.$",
+        "parentId": "root",
+        "file": "routes/auth.$.tsx",
+        "path": "auth/*"
+      },
+      "routes/_index": {
+        "id": "routes/_index",
+        "parentId": "root",
+        "file": "routes/_index/route.tsx",
+        "index": true
+      },
+      "routes/app": {
+        "id": "routes/app",
+        "parentId": "root",
+        "file": "routes/app.tsx",
+        "path": "app"
+      },
+      "routes/app.additional": {
+        "id": "routes/app.additional",
+        "parentId": "routes/app",
+        "file": "routes/app.additional.tsx",
+        "path": "additional"
+      },
+      "routes/app._index": {
+        "id": "routes/app._index",
+        "parentId": "routes/app",
+        "file": "routes/app._index.tsx",
+        "index": true
+      }
+    },
+    "routeDiscovery": {
+      "mode": "lazy",
+      "manifestPath": "/__manifest"
+    },
+    "serverBuildFile": "index.js",
+    "serverModuleFormat": "esm",
+    "ssr": true,
+    "subResourceIntegrity": false,
+    "allowedActionOrigins": false,
+    "unstable_routeConfig": [
+      {
+        "id": "root",
+        "path": "",
+        "file": "root.tsx",
+        "children": [
+          {
+            "id": "routes/webhooks.app.scopes_update",
+            "file": "routes/webhooks.app.scopes_update.tsx",
+            "path": "webhooks/app/scopes_update"
+          },
+          {
+            "id": "routes/webhooks.app.uninstalled",
+            "file": "routes/webhooks.app.uninstalled.tsx",
+            "path": "webhooks/app/uninstalled"
+          },
+          {
+            "id": "routes/webhooks.orders.paid",
+            "file": "routes/webhooks.orders.paid.tsx",
+            "path": "webhooks/orders/paid"
+          },
+          {
+            "id": "routes/api.bling.callback",
+            "file": "routes/api.bling.callback.ts",
+            "path": "api/bling/callback"
+          },
+          {
+            "id": "routes/api.bling.retry",
+            "file": "routes/api.bling.retry.ts",
+            "path": "api/bling/retry"
+          },
+          {
+            "id": "routes/api.bling.auth",
+            "file": "routes/api.bling.auth.ts",
+            "path": "api/bling/auth"
+          },
+          {
+            "id": "routes/api.customers",
+            "file": "routes/api.customers.ts",
+            "path": "api/customers"
+          },
+          {
+            "id": "routes/api.products",
+            "file": "routes/api.products.ts",
+            "path": "api/products"
+          },
+          {
+            "id": "routes/api.sellers",
+            "file": "routes/api.sellers.ts",
+            "path": "api/sellers"
+          },
+          {
+            "id": "routes/auth.login",
+            "file": "routes/auth.login/route.tsx",
+            "path": "auth/login"
+          },
+          {
+            "id": "routes/auth.$",
+            "file": "routes/auth.$.tsx",
+            "path": "auth/*"
+          },
+          {
+            "id": "routes/_index",
+            "file": "routes/_index/route.tsx",
+            "index": true
+          },
+          {
+            "id": "routes/app",
+            "file": "routes/app.tsx",
+            "path": "app",
+            "children": [
+              {
+                "id": "routes/app.additional",
+                "file": "routes/app.additional.tsx",
+                "path": "additional"
+              },
+              {
+                "id": "routes/app._index",
+                "file": "routes/app._index.tsx",
+                "index": true
+              }
+            ]
+          }
+        ]
+      }
+    ]
+  },
+  "viteConfig": {
+    "build": {
+      "assetsDir": "assets"
+    }
+  }
+}

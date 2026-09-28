@@ -55,18 +55,13 @@ https://facascastelsales.vercel.app/api/bling/auth
 
 The callback exchanges the authorization code server-side and stores the access and refresh tokens in `BlingOAuthToken`. Tokens are refreshed automatically before expiration and once after a `401`; they must not be configured as Render environment variables.
 
-The application uses PostgreSQL on AWS RDS with IAM authentication. Configure these server environment variables:
+The application uses Prisma Postgres provisioned through the Vercel Marketplace. Install the Prisma integration from the Vercel project's **Storage** tab; it injects `DATABASE_URL` into the project automatically.
 
 ```text
-DATABASE_URL=postgresql://postgres@database-1-instance-1.copuwemw6prg.us-east-1.rds.amazonaws.com:5432/postgres?sslmode=require
-RDS_HOST=database-1-instance-1.copuwemw6prg.us-east-1.rds.amazonaws.com
-RDS_PORT=5432
-RDS_DATABASE=postgres
-RDS_USERNAME=postgres
-AWS_REGION=us-east-1
+DATABASE_URL=postgresql://...
 ```
 
-The running service needs AWS credentials with `rds-db:connect` permission for the RDS database user. The client generates a new IAM token whenever PostgreSQL opens a connection, so no token is stored as an environment variable. `npm run setup` also creates an ephemeral token before invoking `prisma migrate deploy`; do not run migrations with a token committed in `DATABASE_URL`.
+After adding the integration, run `npx prisma migrate deploy` once with the Vercel `DATABASE_URL` available to create the application tables, including `Session`. Locally, run `vercel env pull .env` first. Do not commit this connection string.
 
 The Bling update preserves the imported order and omits the `loja` field to represent no store, rather than sending the display label `Nenhuma`. Pending imports can be retried by an authorized scheduler with `POST /api/bling/retry` and the `x-bling-retry-secret` header.
 
