@@ -1,7 +1,7 @@
 # Learn more about configuring your app at https://shopify.dev/docs/apps/tools/cli/configuration
 
 client_id = "c619723f04886bb1f4694a8983ca7f20"
-application_url = "https://facascastelsales.onrender.com"
+application_url = "https://facascastelsales.vercel.app"
 embedded = true
 name = "facas-castel-sales"
 
@@ -49,7 +49,7 @@ api_version = "2026-10"
   topics = [ "orders/paid" ]
 
 [auth]
-redirect_urls = [ "https://facascastelsales.onrender.com/api/auth" ]
+redirect_urls = [ "https://facascastelsales.vercel.app/api/auth" ]
 
 [build]
 automatically_update_urls_on_dev = true

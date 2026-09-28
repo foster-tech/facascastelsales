@@ -42,7 +42,7 @@ Configure these server environment variables for Bling:
 BLING_API_URL=https://api.bling.com.br/Api/v3
 BLING_CLIENT_ID=...
 BLING_CLIENT_SECRET=...
-BLING_REDIRECT_URI=https://facascastelsales.onrender.com/api/bling/callback
+BLING_REDIRECT_URI=https://facascastelsales.vercel.app/api/bling/callback
 BLING_ORDER_UPDATE_METHOD=PUT
 BLING_RETRY_SECRET=...
 ```
@@ -50,7 +50,7 @@ BLING_RETRY_SECRET=...
 Authorize the Bling integration once after deployment by opening:
 
 ```text
-https://facascastelsales.onrender.com/api/bling/auth
+https://facascastelsales.vercel.app/api/bling/auth
 ```
 
 The callback exchanges the authorization code server-side and stores the access and refresh tokens in `BlingOAuthToken`. Tokens are refreshed automatically before expiration and once after a `401`; they must not be configured as Render environment variables.
