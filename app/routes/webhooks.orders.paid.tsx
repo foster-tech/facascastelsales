@@ -88,16 +88,46 @@ async function getOrderSellerMetafield(
   );
   const payload = (await response.json()) as {
     data?: { order?: { metafield?: { value?: string } | null } | null };
+    errors?: Array<{ message?: string }>;
   };
+
+  if (payload.errors?.length) {
+    console.warn("[orders/paid] Seller metafield query returned errors", {
+      orderGid,
+      errors: payload.errors.map((error) => error.message || "Erro GraphQL"),
+    });
+  }
 
   return payload.data?.order?.metafield?.value?.trim() || null;
 }
 
 export const action = async ({ request }: ActionFunctionArgs) => {
-  const { admin, payload, shop, webhookId, session } = await authenticate.webhook(request);
+  const { admin, payload, shop, webhookId, session } = await authenticate
+    .webhook(request)
+    .catch((error) => {
+      console.error("[orders/paid] Webhook authentication failed", {
+        pathname: new URL(request.url).pathname,
+      }, error);
+      throw error;
+    });
+
+  console.log("[orders/paid] Webhook authenticated", {
+    shop,
+    webhookId,
+    orderId: payload?.id ? String(payload.id) : null,
+    orderName: payload?.name ? String(payload.name) : null,
+    financialStatus: payload?.financial_status || null,
+    hasSession: Boolean(session),
+    hasAdmin: Boolean(admin),
+  });
 
   if (!session || !admin) {
-    console.log(`[orders/paid] Sessão offline indisponível para ${shop}`);
+    console.warn("[orders/paid] Processing stopped: offline session unavailable", {
+      shop,
+      webhookId,
+      hasSession: Boolean(session),
+      hasAdmin: Boolean(admin),
+    });
     return new Response();
   }
 
@@ -107,59 +137,152 @@ export const action = async ({ request }: ActionFunctionArgs) => {
   const attributes = payload.note_attributes || payload.custom_attributes;
   const sellerId = getAttribute(attributes, "_seller_id");
   const sellerAttributeName = getAttribute(attributes, "vendedor");
-  const metafieldSellerName = sellerAttributeName
-    ? null
-    : await getOrderSellerMetafield(admin, orderGid);
-  let seller = sellerId
-    ? await db.seller.findFirst({ where: { id: sellerId, active: true }, select: { id: true, name: true } })
-    : null;
-  if (!seller && (sellerAttributeName || metafieldSellerName)) {
-    seller = await db.seller.findFirst({
-      where: {
-        normalizedName: normalizeSellerName(sellerAttributeName || metafieldSellerName || ""),
-        active: true,
-      },
-      select: { id: true, name: true },
-    });
-  }
-    const sellerName = seller?.name || sellerAttributeName || metafieldSellerName;
 
-  console.log(`[orders/paid] Shopify order ${shopifyOrderName}`);
+  console.log("[orders/paid] Resolving seller", {
+    shop,
+    webhookId,
+    shopifyOrderId,
+    shopifyOrderName,
+    attributeKeys: Array.isArray(attributes)
+      ? attributes
+          .map((item) => {
+            const candidate = item as { key?: string; name?: string };
+            return candidate.key || candidate.name || null;
+          })
+          .filter(Boolean)
+      : [],
+    hasSellerIdAttribute: Boolean(sellerId),
+    hasSellerNameAttribute: Boolean(sellerAttributeName),
+  });
+
+  let metafieldSellerName: string | null = null;
+  let seller: { id: string; name: string } | null = null;
+  try {
+    metafieldSellerName = sellerAttributeName
+      ? null
+      : await getOrderSellerMetafield(admin, orderGid);
+    seller = sellerId
+      ? await db.seller.findFirst({ where: { id: sellerId, active: true }, select: { id: true, name: true } })
+      : null;
+    if (!seller && (sellerAttributeName || metafieldSellerName)) {
+      seller = await db.seller.findFirst({
+        where: {
+          normalizedName: normalizeSellerName(sellerAttributeName || metafieldSellerName || ""),
+          active: true,
+        },
+        select: { id: true, name: true },
+      });
+    }
+  } catch (error) {
+    console.error("[orders/paid] Seller resolution failed", {
+      shop,
+      webhookId,
+      shopifyOrderId,
+      shopifyOrderName,
+      orderGid,
+    }, error);
+    throw error;
+  }
+  const sellerName = seller?.name || sellerAttributeName || metafieldSellerName;
+
+  console.log("[orders/paid] Seller resolution completed", {
+    shopifyOrderId,
+    shopifyOrderName,
+    sellerFoundInDatabase: Boolean(seller),
+    sellerFromAttribute: Boolean(sellerAttributeName),
+    sellerFromMetafield: Boolean(metafieldSellerName),
+    hasSellerName: Boolean(sellerName),
+  });
 
   if (!sellerName) {
-    console.log("Pedido Shopify sem vendedor associado.");
+    console.warn("[orders/paid] Processing stopped: order has no associated seller", {
+      shop,
+      webhookId,
+      shopifyOrderId,
+      shopifyOrderName,
+    });
     return new Response();
   }
 
-  console.log(`[orders/paid] Seller: ${sellerName}`);
-  const sync = await db.blingOrderSync.upsert({
-    where: { shopDomain_shopifyOrderId: { shopDomain: shop, shopifyOrderId } },
-    create: {
-      shopDomain: shop,
+  console.log("[orders/paid] Upserting BlingOrderSync", {
+    shop,
+    webhookId,
+    shopifyOrderId,
+    shopifyOrderName,
+    sellerName,
+  });
+
+  let sync;
+  try {
+    sync = await db.blingOrderSync.upsert({
+      where: { shopDomain_shopifyOrderId: { shopDomain: shop, shopifyOrderId } },
+      create: {
+        shopDomain: shop,
+        shopifyOrderId,
+        shopifyOrderName,
+        sellerId: seller?.id || null,
+        sellerName,
+        webhookId,
+        status: "PENDING",
+      },
+      update: {
+        shopifyOrderName,
+        sellerId: seller?.id || null,
+        sellerName,
+        webhookId,
+      },
+    });
+  } catch (error) {
+    console.error("[orders/paid] BlingOrderSync upsert failed", {
+      shop,
+      webhookId,
       shopifyOrderId,
       shopifyOrderName,
-      sellerId: seller?.id || null,
-      sellerName,
-      webhookId,
-      status: "PENDING",
-    },
-    update: {
-      shopifyOrderName,
-      sellerId: seller?.id || null,
-      sellerName,
-      webhookId,
-    },
+    }, error);
+    throw error;
+  }
+
+  console.log("[orders/paid] BlingOrderSync persisted", {
+    syncId: sync.id,
+    status: sync.status,
+    attempts: sync.attempts,
+    shopifyOrderId,
+    shopifyOrderName,
   });
 
   try {
+    console.log("[orders/paid] Writing seller metafield", {
+      syncId: sync.id,
+      orderGid,
+    });
     await setOrderSellerMetafield(admin, orderGid, sellerName);
+
     if (sync.status !== "SYNCED") {
-      await processBlingOrderSync(sync);
+      console.log("[orders/paid] Starting Bling synchronization", {
+        syncId: sync.id,
+        status: sync.status,
+      });
+      const processedSync = await processBlingOrderSync(sync);
+      console.log("[orders/paid] Bling synchronization finished", {
+        syncId: processedSync.id,
+        status: processedSync.status,
+        attempts: processedSync.attempts,
+        hasBlingOrderId: Boolean(processedSync.blingOrderId),
+        lastError: processedSync.lastError,
+      });
+    } else {
+      console.log("[orders/paid] Bling synchronization skipped: already synchronized", {
+        syncId: sync.id,
+      });
     }
   } catch (error) {
-    console.error(`[orders/paid] Falha ao sincronizar ${shopifyOrderName}`, error);
+    console.error("[orders/paid] Synchronization failed", {
+      syncId: sync.id,
+      shopifyOrderId,
+      shopifyOrderName,
+    }, error);
     if (error instanceof BlingRateLimitError) {
-      await db.blingOrderSync.update({
+      const pendingSync = await db.blingOrderSync.update({
         where: { id: sync.id },
         data: {
           status: "PENDING",
@@ -167,10 +290,27 @@ export const action = async ({ request }: ActionFunctionArgs) => {
           lastError: error.message,
         },
       });
+      console.warn("[orders/paid] Synchronization kept pending after rate limit", {
+        syncId: pendingSync.id,
+        status: pendingSync.status,
+        attempts: pendingSync.attempts,
+      });
     } else {
-      await markBlingOrderSyncFailed(sync.id, error);
+      const failedSync = await markBlingOrderSyncFailed(sync.id, error);
+      console.error("[orders/paid] Synchronization marked as failed", {
+        syncId: failedSync.id,
+        status: failedSync.status,
+        attempts: failedSync.attempts,
+        lastError: failedSync.lastError,
+      });
     }
   }
 
+  console.log("[orders/paid] Webhook processing completed", {
+    webhookId,
+    shopifyOrderId,
+    shopifyOrderName,
+    syncId: sync.id,
+  });
   return new Response();
 };

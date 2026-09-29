@@ -396,7 +396,21 @@ export async function updateBlingOrderSeller(
 }
 
 export async function processBlingOrderSync(sync: BlingOrderSync) {
+  console.log("[bling] Sync processing started", {
+    syncId: sync.id,
+    shopDomain: sync.shopDomain,
+    shopifyOrderId: sync.shopifyOrderId,
+    shopifyOrderName: sync.shopifyOrderName,
+    status: sync.status,
+    attempts: sync.attempts,
+    hasSellerName: Boolean(sync.sellerName),
+  });
+
   if (!sync.sellerName) {
+    console.error("[bling] Sync processing stopped: seller is missing", {
+      syncId: sync.id,
+      shopifyOrderName: sync.shopifyOrderName,
+    });
     throw new Error("Sincronização sem vendedor associado.");
   }
 
@@ -406,8 +420,12 @@ export async function processBlingOrderSync(sync: BlingOrderSync) {
   );
 
   if (!blingOrder || !blingOrder.id) {
-    console.log(`[bling] Shopify order ${sync.shopifyOrderName} not imported/found yet`);
-    return db.blingOrderSync.update({
+    console.warn("[bling] Shopify order not imported/found yet", {
+      syncId: sync.id,
+      shopifyOrderId: sync.shopifyOrderId,
+      shopifyOrderName: sync.shopifyOrderName,
+    });
+    const pendingSync = await db.blingOrderSync.update({
       where: { id: sync.id },
       data: {
         status: "PENDING",
@@ -415,12 +433,30 @@ export async function processBlingOrderSync(sync: BlingOrderSync) {
         lastError: "Pedido ainda não importado no Bling.",
       },
     });
+    console.log("[bling] Sync kept pending", {
+      syncId: pendingSync.id,
+      status: pendingSync.status,
+      attempts: pendingSync.attempts,
+      lastError: pendingSync.lastError,
+    });
+    return pendingSync;
   }
+
+  console.log("[bling] Search returned a valid order id", {
+    syncId: sync.id,
+    blingOrderId: blingOrder.id,
+    numero: blingOrder.numero,
+    numeroLoja: blingOrder.numeroLoja,
+  });
 
   const blingOrderDetails = await getBlingOrderDetails(blingOrder.id);
   if (!blingOrderDetails || !blingOrderDetails.id) {
-    console.log(`[bling] Shopify order ${sync.shopifyOrderName} not imported/found yet`);
-    return db.blingOrderSync.update({
+    console.warn("[bling] Order details response has no valid id", {
+      syncId: sync.id,
+      requestedBlingOrderId: blingOrder.id,
+      shopifyOrderName: sync.shopifyOrderName,
+    });
+    const pendingSync = await db.blingOrderSync.update({
       where: { id: sync.id },
       data: {
         status: "PENDING",
@@ -428,15 +464,28 @@ export async function processBlingOrderSync(sync: BlingOrderSync) {
         lastError: "Pedido encontrado no Bling sem ID v\u00e1lido.",
       },
     });
+    console.log("[bling] Sync kept pending", {
+      syncId: pendingSync.id,
+      status: pendingSync.status,
+      attempts: pendingSync.attempts,
+      lastError: pendingSync.lastError,
+    });
+    return pendingSync;
   }
 
-  console.log(`[bling] Order found: ${blingOrderDetails.id}`);
-  console.log(`[bling] Setting seller: ${sync.sellerName}`);
-  console.log("[bling] Setting store: Nenhuma (loja omitida do payload)");
+  console.log("[bling] Updating Bling order", {
+    syncId: sync.id,
+    blingOrderId: blingOrderDetails.id,
+    sellerName: sync.sellerName,
+    storeFieldOmitted: true,
+  });
   await updateBlingOrderSeller(blingOrderDetails, sync.sellerName);
-  console.log("[bling] Order synchronized successfully");
+  console.log("[bling] Bling order update completed", {
+    syncId: sync.id,
+    blingOrderId: blingOrderDetails.id,
+  });
 
-  return db.blingOrderSync.update({
+  const synchronizedSync = await db.blingOrderSync.update({
     where: { id: sync.id },
     data: {
       blingOrderId: String(blingOrderDetails.id),
@@ -445,6 +494,13 @@ export async function processBlingOrderSync(sync: BlingOrderSync) {
       lastError: null,
     },
   });
+  console.log("[bling] Sync marked as synchronized", {
+    syncId: synchronizedSync.id,
+    status: synchronizedSync.status,
+    attempts: synchronizedSync.attempts,
+    blingOrderId: synchronizedSync.blingOrderId,
+  });
+  return synchronizedSync;
 }
 
 export async function markBlingOrderSyncFailed(
