@@ -43,7 +43,6 @@ BLING_API_URL=https://api.bling.com.br/Api/v3
 BLING_CLIENT_ID=...
 BLING_CLIENT_SECRET=...
 BLING_REDIRECT_URI=https://facascastelsales.vercel.app/api/bling/callback
-BLING_ORDER_UPDATE_METHOD=PUT
 BLING_RETRY_SECRET=...
 ```
 
@@ -63,7 +62,13 @@ DATABASE_URL=postgresql://...
 
 After adding the integration, run `npx prisma migrate deploy` once with the Vercel `DATABASE_URL` available to create the application tables, including `Session`. Locally, run `vercel env pull .env` first. Do not commit this connection string.
 
-The Bling update preserves the imported order and omits the `loja` field to represent no store, rather than sending the display label `Nenhuma`. Pending imports can be retried by an authorized scheduler with `POST /api/bling/retry` and the `x-bling-retry-secret` header.
+The application does not create sales orders in Bling. It waits for the native Shopify -> Bling integration to import the order, then queries `GET /pedidos/vendas` once with the official `numerosLojas[]` filter. The filter value is the internal Shopify Order ID (for example, `18912198951191`), never the visual order name (for example, `#4681`). A match is accepted only when the response contains exactly one order and its `numeroLoja` is exactly the requested Shopify ID. Otherwise the `BlingOrderSync` remains `PENDING` for a later retry.
+
+Before updating the order, the application resolves the local seller name through `GET /vendedores` and requires exactly one active, exact name match. The sales order is then sent through the documented full `PUT` operation with `vendedor: { id: <numeric Bling seller ID> }`; the seller name is never sent in the native `vendedor` field.
+
+The official Bling schema makes `loja` optional, requires a numeric `loja.id` when present, and does not document either `loja: null` or `loja: { id: 0 }`. Therefore the update omits `loja` to represent **Loja = Nenhuma**, while preserving the other writable fields returned by the order detail endpoint. This removes the store association from that Bling order after the native import; it does not create a replacement order. If the Bling -> Shopify return channel (for example, shipment/status data) is needed for this order, do not remove the store association without first validating that business flow.
+
+Pending imports can be retried by an authorized scheduler with `POST /api/bling/retry` and the `x-bling-retry-secret` header. The order lookup logs only the searched Shopify ID, the result count, whether the exact match was accepted, and the matched Bling order ID.
 
 ### Authenticating and querying data
 
