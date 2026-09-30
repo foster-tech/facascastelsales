@@ -33,6 +33,8 @@ type ProductResult = {
   image?: string | null;
 };
 
+type ProductSort = "relevance" | "price-asc" | "price-desc" | "title";
+
 type OrderItem = {
   localId: string;
   variantId: string;
@@ -220,6 +222,7 @@ export default function Index() {
   const [productQuery, setProductQuery] = useState("");
   const [productResults, setProductResults] = useState<ProductResult[]>([]);
   const [productLoading, setProductLoading] = useState(false);
+  const [productSort, setProductSort] = useState<ProductSort>("relevance");
   const [orderItems, setOrderItems] = useState<OrderItem[]>([]);
   const [note, setNote] = useState("");
   const [error, setError] = useState("");
@@ -374,6 +377,21 @@ export default function Index() {
     [orderItems],
   );
 
+  const sortedProductResults = useMemo(() => {
+    if (productSort === "relevance") {
+      return productResults;
+    }
+
+    return [...productResults].sort((left, right) => {
+      if (productSort === "title") {
+        return left.productTitle.localeCompare(right.productTitle, "pt-BR");
+      }
+
+      const priceDifference = Number(left.price) - Number(right.price);
+      return productSort === "price-asc" ? priceDifference : -priceDifference;
+    });
+  }, [productResults, productSort]);
+
   const addProduct = (product: ProductResult) => {
     setOrderItems((current) => [
       ...current,
@@ -525,7 +543,7 @@ export default function Index() {
   const canCreateOrder = Boolean(selectedSeller) && orderItems.length > 0 && !isCreating;
 
   return (
-    <s-page heading="Novo Pedido">
+    <s-page heading="Novo Pedido" inlineSize="large">
       <s-section>
         <s-stack direction="block" gap="base">
           <s-heading>Vendedor</s-heading>
@@ -690,30 +708,134 @@ export default function Index() {
 
       <s-section>
         <s-stack direction="block" gap="base">
-          <s-heading>Produtos</s-heading>
-          <s-text-field
+          <s-stack direction="inline" gap="base" alignItems="center">
+            <s-icon type="product" />
+            <s-stack direction="block" gap="small">
+              <s-heading>Produtos</s-heading>
+              <s-paragraph color="subdued">
+                Busque e adicione produtos ao pedido.
+              </s-paragraph>
+            </s-stack>
+          </s-stack>
+
+          <s-search-field
             label="Buscar produto"
+            labelAccessibilityVisibility="exclusive"
+            placeholder="Buscar produto"
             value={productQuery}
             onInput={(event: any) => setProductQuery(event.target.value || "")}
           />
-          {productLoading && <s-paragraph>Buscando produtos…</s-paragraph>}
-          {productResults.length > 0 && (
-            <s-stack direction="block" gap="base">
-              {productResults.map((product) => (
-                <s-box key={product.id} padding="base" borderWidth="base" borderRadius="base">
-                  <s-stack direction="block" gap="base">
-                    {product.image && (
-                      <img src={product.image} alt={product.productTitle} style={{ maxWidth: 80, borderRadius: 8 }} />
-                    )}
-                    <s-text>{product.productTitle}</s-text>
-                    <s-text>{product.variantTitle}</s-text>
-                    <s-text>SKU: {product.sku || "—"}</s-text>
-                    <s-text>{formatPrice(product.price)}</s-text>
-                    <s-button onClick={() => addProduct(product)}>Adicionar</s-button>
-                  </s-stack>
-                </s-box>
-              ))}
+
+          {productLoading && (
+            <s-stack direction="inline" gap="base" alignItems="center">
+              <s-spinner size="base" accessibilityLabel="Buscando produtos" />
+              <s-paragraph>Buscando produtos…</s-paragraph>
             </s-stack>
+          )}
+
+          {!productLoading && productResults.length > 0 && (
+            <>
+              <s-query-container>
+                <s-grid
+                  gridTemplateColumns="@container (inline-size > 640px) minmax(0, 1fr) minmax(180px, 220px), minmax(0, 1fr)"
+                  gap="base"
+                  alignItems="end"
+                >
+                  <s-stack direction="inline" gap="small" alignItems="center">
+                    <s-text>{productResults.length} produtos encontrados para</s-text>
+                    <s-text type="strong">“{productQuery.trim()}”</s-text>
+                  </s-stack>
+                  <s-select
+                    label="Ordenar por"
+                    value={productSort}
+                    onChange={(event: any) => setProductSort(event.target.value as ProductSort)}
+                  >
+                    <s-option value="relevance">Mais relevantes</s-option>
+                    <s-option value="price-asc">Menor preço</s-option>
+                    <s-option value="price-desc">Maior preço</s-option>
+                    <s-option value="title">Nome do produto</s-option>
+                  </s-select>
+                </s-grid>
+              </s-query-container>
+
+              <s-query-container>
+                <s-grid
+                  gridTemplateColumns="@container (inline-size > 980px) repeat(3, minmax(0, 1fr)), @container (inline-size > 640px) repeat(2, minmax(0, 1fr)), minmax(0, 1fr)"
+                  gap="base"
+                >
+                  {sortedProductResults.map((product) => (
+                    <s-grid-item key={product.id}>
+                      <s-box padding="base" borderWidth="base" borderRadius="base">
+                        <s-stack direction="block" gap="base">
+                          <s-grid
+                            gridTemplateColumns="112px minmax(0, 1fr)"
+                            gap="base"
+                            alignItems="start"
+                          >
+                            {product.image ? (
+                              <img
+                                src={product.image}
+                                alt={product.productTitle}
+                                loading="lazy"
+                                style={{
+                                  width: 112,
+                                  height: 132,
+                                  display: "block",
+                                  objectFit: "cover",
+                                  borderRadius: 8,
+                                }}
+                              />
+                            ) : (
+                              <div
+                                aria-label="Produto sem imagem"
+                                style={{
+                                  width: 112,
+                                  height: 132,
+                                  display: "grid",
+                                  placeItems: "center",
+                                  borderRadius: 8,
+                                  background: "var(--p-color-bg-surface-secondary, #f1f1f1)",
+                                }}
+                              >
+                                <s-icon type="product" tone="neutral" />
+                              </div>
+                            )}
+
+                            <s-stack direction="block" gap="base">
+                              <s-text type="strong">{product.productTitle}</s-text>
+                              <s-text color="subdued">{product.variantTitle}</s-text>
+                              <s-text color="subdued">SKU: {product.sku || "—"}</s-text>
+                              <s-text type="strong">{formatPrice(product.price)}</s-text>
+                            </s-stack>
+                          </s-grid>
+
+                          <s-divider />
+                          <s-button
+                            variant="primary"
+                            icon="cart"
+                            onClick={() => addProduct(product)}
+                          >
+                            Adicionar
+                          </s-button>
+                        </s-stack>
+                      </s-box>
+                    </s-grid-item>
+                  ))}
+                </s-grid>
+              </s-query-container>
+
+              <s-stack direction="inline" justifyContent="center">
+                <s-paragraph color="subdued">
+                  Mostrando {sortedProductResults.length} de {productResults.length} produtos
+                </s-paragraph>
+              </s-stack>
+            </>
+          )}
+
+          {!productLoading && productQuery.trim() && productResults.length === 0 && (
+            <s-paragraph color="subdued">
+              Nenhum produto encontrado para “{productQuery.trim()}”.
+            </s-paragraph>
           )}
         </s-stack>
       </s-section>
