@@ -737,7 +737,7 @@ export default function Index() {
             <>
               <s-query-container>
                 <s-grid
-                  gridTemplateColumns="@container (inline-size > 640px) minmax(0, 1fr) minmax(180px, 220px), minmax(0, 1fr)"
+                  gridTemplateColumns="@container (inline-size > 640px) 1fr 220px, 1fr"
                   gap="base"
                   alignItems="end"
                 >
@@ -760,7 +760,7 @@ export default function Index() {
 
               <s-query-container>
                 <s-grid
-                  gridTemplateColumns="@container (inline-size > 980px) repeat(3, minmax(0, 1fr)), @container (inline-size > 640px) repeat(2, minmax(0, 1fr)), minmax(0, 1fr)"
+                  gridTemplateColumns="@container (inline-size > 900px) 1fr 1fr 1fr, 1fr"
                   gap="base"
                 >
                   {sortedProductResults.map((product) => (
