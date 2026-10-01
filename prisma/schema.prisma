@@ -55,6 +55,8 @@ model BlingOrderSync {
   shopifyOrderName String
   sellerId        String?
   sellerName      String?
+  blingContactId  String?
+  blingContactName String?
   blingOrderId    String?
   webhookId       String?
   status          BlingOrderSyncStatus @default(PENDING)

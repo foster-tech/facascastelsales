@@ -1,15 +1,10 @@
 import { useEffect, useMemo, useState } from "react";
 import { useFetcher } from "react-router";
-import type {
-  ActionFunctionArgs,
-  HeadersFunction,
-  LoaderFunctionArgs,
-} from "react-router";
+import type { ActionFunctionArgs, HeadersFunction, LoaderFunctionArgs } from "react-router";
 import { boundary } from "@shopify/shopify-app-react-router/server";
 
 import { authenticate } from "../shopify.server";
-import { createOrGetSeller, getActiveSeller } from "../services/sellers.server";
-import { createCustomer as createShopifyCustomer } from "../services/shopify/customers.server";
+import { getBlingContactById, getBlingSellerById } from "../services/bling.server";
 import { createDraftOrder } from "../services/shopify/draft-orders.server";
 
 type CustomerResult = {
@@ -17,6 +12,7 @@ type CustomerResult = {
   name: string;
   email?: string | null;
   phone?: string | null;
+  document?: string | null;
 };
 
 type SellerResult = {
@@ -63,27 +59,6 @@ const generateLocalId = () => {
   return `item-${Date.now()}-${Math.random().toString(16).slice(2)}`;
 };
 
-const parseJsonResponse = async (response: Response) => {
-  const text = await response.text();
-
-  if (!text.trim()) {
-    return null;
-  }
-
-  const trimmedContent = text.trim();
-  if (trimmedContent.startsWith("<")) {
-    throw new Error(
-      "O app respondeu com uma página HTML em vez de JSON. Isso normalmente indica sessão expirada, redirecionamento de autenticação ou loja inválida.",
-    );
-  }
-
-  try {
-    return JSON.parse(trimmedContent);
-  } catch {
-    throw new Error("Resposta inválida do servidor ao criar o pedido.");
-  }
-};
-
 export const loader = async ({ request }: LoaderFunctionArgs) => {
   await authenticate.admin(request);
   return null;
@@ -92,31 +67,11 @@ export const loader = async ({ request }: LoaderFunctionArgs) => {
 export const action = async ({ request }: ActionFunctionArgs) => {
   try {
     if (request.method !== "POST") {
-      return Response.json(
-        { success: false, message: "Método inválido" },
-        { status: 405 },
-      );
+      return Response.json({ success: false, message: "Método inválido" }, { status: 405 });
     }
 
+    await authenticate.admin(request);
     const payload = await request.json();
-
-    if (payload?.mode === "customer-create") {
-      const result = await createShopifyCustomer(request, payload.payload);
-
-      if (result?.userErrors?.length) {
-        return Response.json(
-          { success: false, message: result.userErrors[0].message },
-          { status: 400 },
-        );
-      }
-
-      return Response.json({ success: true, customer: result.customer });
-    }
-
-    if (payload?.mode === "seller-create") {
-      const seller = await createOrGetSeller(String(payload.name || ""));
-      return Response.json({ success: true, seller });
-    }
 
     if (!payload || !Array.isArray(payload.items) || payload.items.length === 0) {
       return Response.json(
@@ -127,39 +82,47 @@ export const action = async ({ request }: ActionFunctionArgs) => {
 
     if (!payload.sellerId) {
       return Response.json(
-        { success: false, message: "Selecione o vendedor responsável pelo pedido." },
+        {
+          success: false,
+          message: "Selecione o vendedor responsável pelo pedido.",
+        },
         { status: 400 },
       );
     }
 
-    const seller = await getActiveSeller(String(payload.sellerId));
+    const seller = await getBlingSellerById(String(payload.sellerId));
+    const customer = payload.blingContactId
+      ? await getBlingContactById(String(payload.blingContactId))
+      : null;
 
     const lineItems = payload.items.flatMap((item: any) => {
-    const quantity = Math.max(1, Number(item.quantity || 1));
-    const engravings = Array.isArray(item.engravings) ? item.engravings : [];
+      const quantity = Math.max(1, Number(item.quantity || 1));
+      const engravings = Array.isArray(item.engravings) ? item.engravings : [];
 
-    if (!engravings.length || engravings.every((value: unknown) => !String(value ?? "").trim())) {
-      return [{
-        variantId: item.variantId,
-        quantity,
-        priceOverride: String(item.originalUnitPrice || "0"),
-      }];
-    }
+      if (!engravings.length || engravings.every((value: unknown) => !String(value ?? "").trim())) {
+        return [
+          {
+            variantId: item.variantId,
+            quantity,
+            priceOverride: String(item.originalUnitPrice || "0"),
+          },
+        ];
+      }
 
-    return Array.from({ length: quantity }, (_, index) => {
-      const value = String(engravings[index] ?? "").trim();
+      return Array.from({ length: quantity }, (_, index) => {
+        const value = String(engravings[index] ?? "").trim();
 
-      return {
-        variantId: item.variantId,
-        quantity: 1,
-        priceOverride: String(item.originalUnitPrice || "0"),
-        ...(value ? { customAttributes: [{ key: "Personalização", value }] } : {}),
-      };
-    });
+        return {
+          variantId: item.variantId,
+          quantity: 1,
+          priceOverride: String(item.originalUnitPrice || "0"),
+          ...(value ? { customAttributes: [{ key: "Personalização", value }] } : {}),
+        };
+      });
     });
 
     const result = await createDraftOrder(request, {
-      customerId: payload.customerId || null,
+      customer,
       note: payload.note || "",
       sellerId: seller.id,
       sellerName: seller.name,
@@ -192,9 +155,7 @@ export const action = async ({ request }: ActionFunctionArgs) => {
       {
         success: false,
         message:
-          actionError instanceof Error
-            ? actionError.message
-            : "Erro interno ao criar o pedido.",
+          actionError instanceof Error ? actionError.message : "Erro interno ao criar o pedido.",
       },
       { status: 500 },
     );
@@ -213,12 +174,6 @@ export default function Index() {
   const [isCustomerOpen, setIsCustomerOpen] = useState(false);
   const [customerLoading, setCustomerLoading] = useState(false);
   const [customerError, setCustomerError] = useState("");
-  const [newCustomer, setNewCustomer] = useState({
-    firstName: "",
-    lastName: "",
-    email: "",
-    phone: "",
-  });
   const [productQuery, setProductQuery] = useState("");
   const [productResults, setProductResults] = useState<ProductResult[]>([]);
   const [productLoading, setProductLoading] = useState(false);
@@ -226,27 +181,12 @@ export default function Index() {
   const [orderItems, setOrderItems] = useState<OrderItem[]>([]);
   const [note, setNote] = useState("");
   const [error, setError] = useState("");
-  const [success, setSuccess] = useState<{ name: string; invoiceUrl: string } | null>(null);
+  const [success, setSuccess] = useState<{
+    name: string;
+    invoiceUrl: string;
+  } | null>(null);
   const [isCreating, setIsCreating] = useState(false);
   const draftOrderFetcher = useFetcher<any>();
-  const sellerFetcher = useFetcher<any>();
-
-  useEffect(() => {
-    if (sellerFetcher.state !== "idle" || !sellerFetcher.data) {
-      return;
-    }
-
-    const result = sellerFetcher.data;
-    if (!result.success || !result.seller?.id) {
-      setSellerError(result.message || "Não foi possível criar o vendedor.");
-      return;
-    }
-
-    setSelectedSeller(result.seller);
-    setSellerQuery("");
-    setSellerResults([]);
-    setSellerError("");
-  }, [sellerFetcher.data, sellerFetcher.state]);
 
   useEffect(() => {
     const timeout = window.setTimeout(async () => {
@@ -317,9 +257,7 @@ export default function Index() {
       setCustomerError("");
 
       try {
-        const response = await fetch(
-          `/api/customers?query=${encodeURIComponent(customerQuery)}`,
-        );
+        const response = await fetch(`/api/customers?query=${encodeURIComponent(customerQuery)}`);
 
         if (!response.ok) {
           throw new Error("Não foi possível buscar clientes");
@@ -348,9 +286,7 @@ export default function Index() {
       setProductLoading(true);
 
       try {
-        const response = await fetch(
-          `/api/products?query=${encodeURIComponent(productQuery)}`,
-        );
+        const response = await fetch(`/api/products?query=${encodeURIComponent(productQuery)}`);
 
         if (!response.ok) {
           throw new Error("Erro ao buscar produtos");
@@ -370,10 +306,7 @@ export default function Index() {
 
   const subtotal = useMemo(
     () =>
-      orderItems.reduce(
-        (total, item) => total + Number(item.displayPrice || 0) * item.quantity,
-        0,
-      ),
+      orderItems.reduce((total, item) => total + Number(item.displayPrice || 0) * item.quantity, 0),
     [orderItems],
   );
 
@@ -420,7 +353,10 @@ export default function Index() {
         }
 
         const nextQuantity = Math.max(1, item.quantity + delta);
-        const nextEngravings = Array.from({ length: nextQuantity }, (_, index) => item.engravings[index] ?? "");
+        const nextEngravings = Array.from(
+          { length: nextQuantity },
+          (_, index) => item.engravings[index] ?? "",
+        );
 
         return { ...item, quantity: nextQuantity, engravings: nextEngravings };
       }),
@@ -445,72 +381,6 @@ export default function Index() {
     setOrderItems((current) => current.filter((item) => item.localId !== localId));
   };
 
-  const createCustomer = async () => {
-    const payload = {
-      firstName: newCustomer.firstName.trim(),
-      lastName: newCustomer.lastName.trim(),
-      email: newCustomer.email.trim(),
-      phone: newCustomer.phone.trim(),
-    };
-
-    if (!payload.firstName || !payload.email) {
-      setCustomerError("Informe nome e e-mail para criar o cliente.");
-      return;
-    }
-
-    try {
-      const response = await fetch(window.location.href, {
-        method: "POST",
-        credentials: "include",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ mode: "customer-create", payload }),
-      });
-
-      const result = await parseJsonResponse(response);
-      if (!response.ok || !result?.customer?.id) {
-        throw new Error(result?.message || "Não foi possível criar o cliente");
-      }
-
-      const customer = {
-        id: result.customer.id,
-        name:
-          `${result.customer.firstName || ""} ${result.customer.lastName || ""}`.trim() ||
-          "Cliente",
-        email: result.customer.email,
-        phone: result.customer.phone,
-      };
-
-      setSelectedCustomer(customer);
-      setCustomerQuery("");
-      setCustomerResults([]);
-      setNewCustomer({ firstName: "", lastName: "", email: "", phone: "" });
-    } catch (customerErrorMessage) {
-      setCustomerError(
-        customerErrorMessage instanceof Error
-          ? customerErrorMessage.message
-          : "Não foi possível criar o cliente.",
-      );
-    }
-  };
-
-  const createSeller = () => {
-    const name = sellerQuery.trim();
-    if (!name) {
-      setSellerError("Informe o nome do vendedor.");
-      return;
-    }
-
-    setSellerError("");
-    sellerFetcher.submit(
-      JSON.stringify({ name }),
-      {
-        method: "post",
-        action: `/api/sellers${window.location.search}`,
-        encType: "application/json",
-      },
-    );
-  };
-
   const handleCreateDraftOrder = async () => {
     if (!selectedSeller) {
       setError("Selecione o vendedor responsável pelo pedido.");
@@ -527,7 +397,7 @@ export default function Index() {
     draftOrderFetcher.submit(
       JSON.stringify({
         sellerId: selectedSeller.id,
-        customerId: selectedCustomer?.id ?? null,
+        blingContactId: selectedCustomer?.id ?? null,
         note,
         items: orderItems.map((item) => ({
           variantId: item.variantId,
@@ -546,11 +416,11 @@ export default function Index() {
     <s-page heading="Novo Pedido" inlineSize="large">
       <s-section>
         <s-stack direction="block" gap="base">
-          <s-heading>Vendedor</s-heading>
+          <s-heading>Vendedor do Bling</s-heading>
           {!selectedSeller ? (
             <>
               <s-text-field
-                label="Buscar vendedor"
+                label="Buscar vendedor no Bling"
                 value={sellerQuery}
                 onInput={(event: any) => setSellerQuery(event.target.value || "")}
               />
@@ -559,31 +429,19 @@ export default function Index() {
               {sellerResults.length > 0 && (
                 <s-stack direction="block" gap="base">
                   {sellerResults.map((seller) => (
-                    <s-box
-                      key={seller.id}
-                      padding="base"
-                      borderWidth="base"
-                      borderRadius="base"
-                    >
+                    <s-box key={seller.id} padding="base" borderWidth="base" borderRadius="base">
                       <s-stack direction="block" gap="base">
                         <s-text>{seller.name}</s-text>
-                        <s-button onClick={() => setSelectedSeller(seller)}>
-                          Selecionar
-                        </s-button>
+                        <s-button onClick={() => setSelectedSeller(seller)}>Selecionar</s-button>
                       </s-stack>
                     </s-box>
                   ))}
                 </s-stack>
               )}
               {sellerQuery.trim() && !sellerLoading && sellerResults.length === 0 && (
-                <s-button
-                  disabled={sellerFetcher.state !== "idle"}
-                  onClick={createSeller}
-                >
-                  {sellerFetcher.state === "submitting"
-                    ? "Criando vendedor…"
-                    : `+ Criar vendedor "${sellerQuery.trim()}"`}
-                </s-button>
+                <s-paragraph color="subdued">
+                  Nenhum vendedor ativo encontrado no Bling.
+                </s-paragraph>
               )}
             </>
           ) : (
@@ -602,7 +460,7 @@ export default function Index() {
       <s-section>
         <s-stack direction="block" gap="base">
           <s-stack direction="inline" justifyContent="space-between" gap="base">
-            <s-heading>Cliente (Opcional)</s-heading>
+            <s-heading>Cliente do Bling (Opcional)</s-heading>
             <s-button
               variant="tertiary"
               icon={isCustomerOpen ? "chevron-up" : "chevron-down"}
@@ -611,98 +469,61 @@ export default function Index() {
             />
           </s-stack>
 
-          {isCustomerOpen && (!selectedCustomer ? (
-            <>
-              <s-text-field
-                label="Buscar cliente"
-                value={customerQuery}
-                onInput={(event: any) => setCustomerQuery(event.target.value || "")}
-              />
+          {isCustomerOpen &&
+            (!selectedCustomer ? (
+              <>
+                <s-text-field
+                  label="Buscar cliente no Bling"
+                  value={customerQuery}
+                  onInput={(event: any) => setCustomerQuery(event.target.value || "")}
+                />
 
-              {customerLoading && <s-paragraph>Buscando clientes…</s-paragraph>}
-              {customerError && <s-banner tone="critical">{customerError}</s-banner>}
+                {customerLoading && <s-paragraph>Buscando clientes…</s-paragraph>}
+                {customerError && <s-banner tone="critical">{customerError}</s-banner>}
 
-              {customerResults.length > 0 && (
+                {customerResults.length > 0 && (
+                  <s-stack direction="block" gap="base">
+                    {customerResults.map((customer) => (
+                      <s-box
+                        key={customer.id}
+                        padding="base"
+                        borderWidth="base"
+                        borderRadius="base"
+                      >
+                        <s-stack direction="block" gap="base">
+                          <s-text>{customer.name}</s-text>
+                          {customer.document && <s-text>CPF/CNPJ: {customer.document}</s-text>}
+                          {customer.email && <s-text>{customer.email}</s-text>}
+                          {customer.phone && <s-text>{customer.phone}</s-text>}
+                          <s-button onClick={() => setSelectedCustomer(customer)}>
+                            Selecionar
+                          </s-button>
+                        </s-stack>
+                      </s-box>
+                    ))}
+                  </s-stack>
+                )}
+                {customerQuery.trim() && !customerLoading && customerResults.length === 0 && (
+                  <s-paragraph color="subdued">
+                    Nenhum cliente ativo encontrado no Bling.
+                  </s-paragraph>
+                )}
+              </>
+            ) : (
+              <s-box padding="base" borderWidth="base" borderRadius="base">
                 <s-stack direction="block" gap="base">
-                  {customerResults.map((customer) => (
-                    <s-box
-                      key={customer.id}
-                      padding="base"
-                      borderWidth="base"
-                      borderRadius="base"
-                    >
-                      <s-stack direction="block" gap="base">
-                        <s-text>{customer.name}</s-text>
-                        {customer.email && <s-text>{customer.email}</s-text>}
-                        {customer.phone && <s-text>{customer.phone}</s-text>}
-                        <s-button onClick={() => setSelectedCustomer(customer)}>
-                          Selecionar
-                        </s-button>
-                      </s-stack>
-                    </s-box>
-                  ))}
+                  <s-text>{selectedCustomer.name}</s-text>
+                  {selectedCustomer.document && (
+                    <s-text>CPF/CNPJ: {selectedCustomer.document}</s-text>
+                  )}
+                  {selectedCustomer.email && <s-text>{selectedCustomer.email}</s-text>}
+                  {selectedCustomer.phone && <s-text>{selectedCustomer.phone}</s-text>}
+                  <s-button variant="tertiary" onClick={() => setSelectedCustomer(null)}>
+                    Trocar cliente
+                  </s-button>
                 </s-stack>
-              )}
-
-              <s-section>
-                <s-heading>Cliente novo</s-heading>
-                <s-stack direction="block" gap="base">
-                  <s-text-field
-                    label="Nome"
-                    value={newCustomer.firstName}
-                    onInput={(event: any) =>
-                      setNewCustomer((current) => ({
-                        ...current,
-                        firstName: event.target.value || "",
-                      }))
-                    }
-                  />
-                  <s-text-field
-                    label="Sobrenome"
-                    value={newCustomer.lastName}
-                    onInput={(event: any) =>
-                      setNewCustomer((current) => ({
-                        ...current,
-                        lastName: event.target.value || "",
-                      }))
-                    }
-                  />
-                  <s-text-field
-                    label="E-mail"
-                    value={newCustomer.email}
-                    onInput={(event: any) =>
-                      setNewCustomer((current) => ({
-                        ...current,
-                        email: event.target.value || "",
-                      }))
-                    }
-                  />
-                  <s-text-field
-                    label="Telefone"
-                    value={newCustomer.phone}
-                    onInput={(event: any) =>
-                      setNewCustomer((current) => ({
-                        ...current,
-                        phone: event.target.value || "",
-                      }))
-                    }
-                  />
-                  <s-button onClick={createCustomer}>Criar cliente</s-button>
-                </s-stack>
-              </s-section>
-            </>
-          ) : (
-            <s-box padding="base" borderWidth="base" borderRadius="base">
-              <s-stack direction="block" gap="base">
-                <s-text>{selectedCustomer.name}</s-text>
-                {selectedCustomer.email && <s-text>{selectedCustomer.email}</s-text>}
-                {selectedCustomer.phone && <s-text>{selectedCustomer.phone}</s-text>}
-                <s-button variant="tertiary" onClick={() => setSelectedCustomer(null)}>
-                  Trocar cliente
-                </s-button>
-              </s-stack>
-            </s-box>
-          ))}
+              </s-box>
+            ))}
         </s-stack>
       </s-section>
 
@@ -712,9 +533,7 @@ export default function Index() {
             <s-icon type="product" />
             <s-stack direction="block" gap="small">
               <s-heading>Produtos</s-heading>
-              <s-paragraph color="subdued">
-                Busque e adicione produtos ao pedido.
-              </s-paragraph>
+              <s-paragraph color="subdued">Busque e adicione produtos ao pedido.</s-paragraph>
             </s-stack>
           </s-stack>
 
@@ -850,7 +669,13 @@ export default function Index() {
               <s-box key={item.localId} padding="base" borderWidth="base" borderRadius="base">
                 <s-stack direction="block" gap="base">
                   <s-stack direction="inline" gap="base">
-                    {item.image && <img src={item.image} alt={item.productTitle} style={{ maxWidth: 70, borderRadius: 8 }} />}
+                    {item.image && (
+                      <img
+                        src={item.image}
+                        alt={item.productTitle}
+                        style={{ maxWidth: 70, borderRadius: 8 }}
+                      />
+                    )}
                     <s-stack direction="block" gap="base">
                       <s-text>{item.productTitle}</s-text>
                       <s-text>{item.variantTitle}</s-text>
@@ -859,11 +684,16 @@ export default function Index() {
                         label="Valor unitário"
                         value={item.displayPrice}
                         onInput={(event: any) =>
-                          setOrderItems((current) => current.map((currentItem) =>
-                            currentItem.localId === item.localId
-                              ? { ...currentItem, displayPrice: event.target.value || "0" }
-                              : currentItem,
-                          ))
+                          setOrderItems((current) =>
+                            current.map((currentItem) =>
+                              currentItem.localId === item.localId
+                                ? {
+                                    ...currentItem,
+                                    displayPrice: event.target.value || "0",
+                                  }
+                                : currentItem,
+                            ),
+                          )
                         }
                       />
                     </s-stack>
@@ -872,7 +702,9 @@ export default function Index() {
                     <s-button onClick={() => adjustQuantity(item.localId, -1)}>-</s-button>
                     <s-text>{item.quantity}</s-text>
                     <s-button onClick={() => adjustQuantity(item.localId, 1)}>+</s-button>
-                    <s-button variant="tertiary" onClick={() => removeItem(item.localId)}>Remover</s-button>
+                    <s-button variant="tertiary" onClick={() => removeItem(item.localId)}>
+                      Remover
+                    </s-button>
                   </s-stack>
                   <s-heading>Personalização</s-heading>
                   {Array.from({ length: item.quantity }, (_, index) => (
@@ -880,7 +712,9 @@ export default function Index() {
                       key={`${item.localId}-${index}`}
                       label={`Unidade ${index + 1}`}
                       value={item.engravings[index] || ""}
-                      onInput={(event: any) => updateEngraving(item.localId, index, event.target.value || "")}
+                      onInput={(event: any) =>
+                        updateEngraving(item.localId, index, event.target.value || "")
+                      }
                     />
                   ))}
                 </s-stack>
@@ -892,10 +726,7 @@ export default function Index() {
 
       <s-section>
         <s-heading>Observações (Opcional)</s-heading>
-        <s-text-field
-          value={note}
-          onInput={(event: any) => setNote(event.target.value || "")}
-        />
+        <s-text-field value={note} onInput={(event: any) => setNote(event.target.value || "")} />
       </s-section>
 
       <s-section>
@@ -908,7 +739,10 @@ export default function Index() {
           {error && <s-banner tone="critical">{error}</s-banner>}
           {success ? (
             <s-banner tone="success">
-              Pedido criado com sucesso. <a href={success.invoiceUrl} target="_blank" rel="noreferrer">Abrir checkout</a>
+              Pedido criado com sucesso.{" "}
+              <a href={success.invoiceUrl} target="_blank" rel="noreferrer">
+                Abrir checkout
+              </a>
             </s-banner>
           ) : null}
           <s-button disabled={!canCreateOrder} onClick={handleCreateDraftOrder}>

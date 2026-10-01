@@ -34,7 +34,9 @@ Local development is powered by [the Shopify CLI](https://shopify.dev/docs/apps/
 
 ### Internal sales and Bling synchronization
 
-The internal order screen requires a local seller from the `Seller` table. The selected seller name and `_seller_id` are stored on the Shopify Draft Order. When the order is paid, the `orders/paid` webhook writes `custom.vendedor` to the final Shopify Order and attempts to update the corresponding Bling sales order using its `numeroLoja` external identifier.
+The internal order screen searches active sellers and contacts directly in Bling. It no longer creates or reads sellers from the local `Seller` table. The selected Bling seller ID is stored as `_bling_seller_id` on the Shopify Draft Order; an optional selected contact is stored as `_bling_contact_id`. The contact's e-mail, phone and addresses are also copied to the draft order so the payment checkout receives the customer data.
+
+When the order is paid, the `orders/paid` webhook writes the seller name and numeric Bling ID to Shopify metafields, persists only the external IDs needed for retry in `BlingOrderSync`, and updates the sales order that was imported by the native Shopify -> Bling integration. No seller or customer master record is created locally or in Shopify by this flow.
 
 Configure these server environment variables for Bling:
 
@@ -64,11 +66,17 @@ After adding the integration, run `npx prisma migrate deploy` once with the Verc
 
 The application does not create sales orders in Bling. It waits for the native Shopify -> Bling integration to import the order, then queries `GET /pedidos/vendas` once with the official `numerosLojas[]` filter. The filter value is the internal Shopify Order ID (for example, `18912198951191`), never the visual order name (for example, `#4681`). A match is accepted only when the response contains exactly one order and its `numeroLoja` is exactly the requested Shopify ID. Otherwise the `BlingOrderSync` remains `PENDING` for a later retry.
 
-Before updating the order, the application resolves the local seller name through `GET /vendedores` and requires exactly one active, exact name match. The sales order is then sent through the documented full `PUT` operation with `vendedor: { id: <numeric Bling seller ID> }`; the seller name is never sent in the native `vendedor` field.
+The UI searches sellers with `GET /vendedores` and contacts with `GET /contatos`. On submission, both selections are validated again through their individual Bling endpoints. The sales order is then sent through the documented full `PUT` operation with `vendedor: { id: <numeric Bling seller ID> }` and, when a customer was selected, `contato: { id: <numeric Bling contact ID> }`. Names are never sent in those native ID fields. Legacy orders that only contain a seller name can still fall back to an exact active-name lookup.
 
 The official Bling schema makes `loja` optional, requires a numeric `loja.id` when present, and does not document either `loja: null` or `loja: { id: 0 }`. Therefore the update omits `loja` to represent **Loja = Nenhuma**, while preserving the other writable fields returned by the order detail endpoint. This removes the store association from that Bling order after the native import; it does not create a replacement order. If the Bling -> Shopify return channel (for example, shipment/status data) is needed for this order, do not remove the store association without first validating that business flow.
 
 Pending imports can be retried by an authorized scheduler with `POST /api/bling/retry` and the `x-bling-retry-secret` header. The order lookup logs only the searched Shopify ID, the result count, whether the exact match was accepted, and the matched Bling order ID.
+
+Deploy the Prisma migration before releasing this version so `BlingOrderSync` can retain the selected Bling contact reference:
+
+```shell
+npx prisma migrate deploy
+```
 
 ### Authenticating and querying data
 
