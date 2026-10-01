@@ -54,6 +54,8 @@ Authorize the Bling integration once after deployment by opening:
 https://facascastelsales.vercel.app/api/bling/auth
 ```
 
+The Bling application must include read access to **Vendedores** and **Contatos**. If either scope is added in the Bling developer panel, authorize the integration again at the URL above so the stored token receives the updated permissions. Seller searches log only the searched name, result counts and whether the active-list fallback was needed; API errors are shown in the app instead of being reported as an empty result.
+
 The callback exchanges the authorization code server-side and stores the access and refresh tokens in `BlingOAuthToken`. Tokens are refreshed automatically before expiration and once after a `401`; they must not be configured as Render environment variables.
 
 The application uses Prisma Postgres provisioned through the Vercel Marketplace. Install the Prisma integration from the Vercel project's **Storage** tab; it injects `DATABASE_URL` into the project automatically.

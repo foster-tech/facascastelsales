@@ -1,7 +1,8 @@
 import db from "../db.server";
 import type { BlingOrderSync, BlingOrderSyncStatus } from "@prisma/client";
 
-const blingApiBaseUrl = process.env.BLING_API_URL || "https://api.bling.com.br/Api/v3";
+const blingApiBaseUrl =
+  process.env.BLING_API_URL || "https://api.bling.com.br/Api/v3";
 const blingTokenUrl = `${blingApiBaseUrl}/oauth/token`;
 const blingTokenId = "default";
 const tokenSafetyMarginMs = 5 * 60 * 1000;
@@ -140,7 +141,10 @@ const waitForBlingRequestSlot = async () => {
   });
 
   await previousRequest;
-  const waitMs = Math.max(0, blingRequestIntervalMs - (Date.now() - lastBlingRequestAt));
+  const waitMs = Math.max(
+    0,
+    blingRequestIntervalMs - (Date.now() - lastBlingRequestAt),
+  );
   if (waitMs > 0) {
     await new Promise((resolve) => setTimeout(resolve, waitMs));
   }
@@ -185,7 +189,9 @@ async function requestBlingToken(body: URLSearchParams) {
   }
 
   if (!payload.refresh_token || !payload.expires_in) {
-    throw new Error("Resposta OAuth do Bling não contém refresh_token ou expires_in.");
+    throw new Error(
+      "Resposta OAuth do Bling não contém refresh_token ou expires_in.",
+    );
   }
 
   return {
@@ -236,7 +242,10 @@ export async function exchangeBlingAuthorizationCode(code: string) {
   await persistBlingToken(payload);
 }
 
-export async function getValidBlingAccessToken(forceRefresh = false, failedToken?: string) {
+export async function getValidBlingAccessToken(
+  forceRefresh = false,
+  failedToken?: string,
+) {
   const stored = await db.blingOAuthToken.findUnique({
     where: { id: blingTokenId },
   });
@@ -244,12 +253,18 @@ export async function getValidBlingAccessToken(forceRefresh = false, failedToken
     throw new Error("Bling ainda não foi autorizado. Acesse /api/bling/auth.");
   }
 
-  const tokenIsValid = stored.expiresAt.getTime() - Date.now() > tokenSafetyMarginMs;
+  const tokenIsValid =
+    stored.expiresAt.getTime() - Date.now() > tokenSafetyMarginMs;
   if (!forceRefresh && tokenIsValid) {
     return stored.accessToken;
   }
 
-  if (forceRefresh && failedToken && stored.accessToken !== failedToken && tokenIsValid) {
+  if (
+    forceRefresh &&
+    failedToken &&
+    stored.accessToken !== failedToken &&
+    tokenIsValid
+  ) {
     return stored.accessToken;
   }
 
@@ -263,7 +278,9 @@ export async function getValidBlingAccessToken(forceRefresh = false, failedToken
       where: { id: blingTokenId },
     });
     if (!latest) {
-      throw new Error("Bling ainda não foi autorizado. Acesse /api/bling/auth.");
+      throw new Error(
+        "Bling ainda não foi autorizado. Acesse /api/bling/auth.",
+      );
     }
 
     if (
@@ -323,7 +340,10 @@ const blingFetch = async <T>(path: string, init?: RequestInit): Promise<T> => {
     const retryAfterSeconds = Number(retryAfterHeader || 1);
     const retryAfterMs = Math.min(
       5000,
-      Math.max(400, Number.isFinite(retryAfterSeconds) ? retryAfterSeconds * 1000 : 1000),
+      Math.max(
+        400,
+        Number.isFinite(retryAfterSeconds) ? retryAfterSeconds * 1000 : 1000,
+      ),
     );
 
     console.warn(`[bling] Rate limit atingido; retry em ${retryAfterMs}ms`);
@@ -360,7 +380,9 @@ export async function findBlingOrderByShopifyOrder(
   const params = new URLSearchParams();
   params.append("numerosLojas[]", searchedId);
 
-  const response = await blingFetch<{ data?: unknown }>(`/pedidos/vendas?${params.toString()}`);
+  const response = await blingFetch<{ data?: unknown }>(
+    `/pedidos/vendas?${params.toString()}`,
+  );
   const orders = Array.isArray(response?.data) ? response.data : [];
   const matches = orders.filter((candidate) => {
     if (!candidate || typeof candidate !== "object") {
@@ -368,14 +390,21 @@ export async function findBlingOrderByShopifyOrder(
     }
 
     const item = candidate as Partial<BlingOrder>;
-    return typeof item.numeroLoja === "string" && item.numeroLoja.trim() === searchedId;
+    return (
+      typeof item.numeroLoja === "string" &&
+      item.numeroLoja.trim() === searchedId
+    );
   });
   const matchedOrder =
-    orders.length === 1 && matches.length === 1 ? (matches[0] as Partial<BlingOrder>) : null;
+    orders.length === 1 && matches.length === 1
+      ? (matches[0] as Partial<BlingOrder>)
+      : null;
   const matchedId =
     matchedOrder &&
-    ((typeof matchedOrder.id === "number" && Number.isSafeInteger(matchedOrder.id)) ||
-      (typeof matchedOrder.id === "string" && matchedOrder.id.trim().length > 0))
+    ((typeof matchedOrder.id === "number" &&
+      Number.isSafeInteger(matchedOrder.id)) ||
+      (typeof matchedOrder.id === "string" &&
+        matchedOrder.id.trim().length > 0))
       ? matchedOrder.id
       : null;
 
@@ -392,7 +421,9 @@ export async function findBlingOrderByShopifyOrder(
 
   return {
     id: typeof matchedId === "string" ? matchedId.trim() : matchedId,
-    ...(typeof matchedOrder.numero === "number" ? { numero: matchedOrder.numero } : {}),
+    ...(typeof matchedOrder.numero === "number"
+      ? { numero: matchedOrder.numero }
+      : {}),
     numeroLoja: searchedId,
   };
 }
@@ -418,7 +449,11 @@ const parseBlingNumericId = (value: unknown): number | null => {
 };
 
 const asBlingList = (value: unknown): unknown[] =>
-  Array.isArray(value) ? value : value && typeof value === "object" ? [value] : [];
+  Array.isArray(value)
+    ? value
+    : value && typeof value === "object"
+      ? [value]
+      : [];
 
 const mapBlingSeller = (candidate: unknown): BlingSellerResult | null => {
   if (!candidate || typeof candidate !== "object") {
@@ -428,7 +463,11 @@ const mapBlingSeller = (candidate: unknown): BlingSellerResult | null => {
   const seller = candidate as BlingSellerApi;
   const id = parseBlingNumericId(seller.id);
   const name = seller.contato?.nome?.trim();
-  if (!id || !name || (seller.contato?.situacao && seller.contato.situacao !== "A")) {
+  if (
+    !id ||
+    !name ||
+    (seller.contato?.situacao && seller.contato.situacao !== "A")
+  ) {
     return null;
   }
 
@@ -478,39 +517,86 @@ const mapBlingContact = (candidate: unknown): BlingContactResult | null => {
   };
 };
 
-export async function searchBlingSellers(query: string): Promise<BlingSellerResult[]> {
+export async function searchBlingSellers(
+  query: string,
+): Promise<BlingSellerResult[]> {
+  const search = query.trim();
   const params = new URLSearchParams({
     situacaoContato: "A",
     limite: "20",
   });
-  const search = query.trim();
   if (search) {
     params.set("nomeContato", search);
   }
 
-  const response = await blingFetch<{ data?: unknown }>(`/vendedores?${params.toString()}`);
-
-  return asBlingList(response?.data)
+  const response = await blingFetch<{ data?: unknown }>(
+    `/vendedores?${params.toString()}`,
+  );
+  const returnedSellers = asBlingList(response?.data);
+  let validSellers = returnedSellers
     .map(mapBlingSeller)
     .filter((seller): seller is BlingSellerResult => Boolean(seller));
+  let usedActiveListFallback = false;
+  let fallbackResultCount = 0;
+
+  // O filtro nomeContato do Bling pode não retornar correspondências para buscas
+  // parciais. Nesse caso, consulta a primeira página completa de vendedores ativos
+  // e aplica uma comparação normalizada, sem acentos, no servidor.
+  if (search && validSellers.length === 0) {
+    usedActiveListFallback = true;
+    const fallbackParams = new URLSearchParams({
+      situacaoContato: "A",
+      limite: "100",
+    });
+    const fallbackResponse = await blingFetch<{ data?: unknown }>(
+      `/vendedores?${fallbackParams.toString()}`,
+    );
+    const normalizedSearch = normalizeName(search);
+    const fallbackSellers = asBlingList(fallbackResponse?.data);
+    fallbackResultCount = fallbackSellers.length;
+
+    validSellers = fallbackSellers
+      .map(mapBlingSeller)
+      .filter((seller): seller is BlingSellerResult => Boolean(seller))
+      .filter((seller) => normalizeName(seller.name).includes(normalizedSearch))
+      .slice(0, 20);
+  }
+
+  console.info("[bling/sellers] Search completed", {
+    query: search,
+    resultCount: returnedSellers.length,
+    fallbackResultCount,
+    matchedCount: validSellers.length,
+    usedActiveListFallback,
+  });
+
+  return validSellers;
 }
 
-export async function getBlingSellerById(id: string): Promise<BlingSellerResult> {
+export async function getBlingSellerById(
+  id: string,
+): Promise<BlingSellerResult> {
   const numericId = parseBlingNumericId(id);
   if (!numericId) {
     throw new Error("Selecione um vendedor válido do Bling.");
   }
 
-  const response = await blingFetch<{ data?: unknown }>(`/vendedores/${numericId}`);
+  const response = await blingFetch<{ data?: unknown }>(
+    `/vendedores/${numericId}`,
+  );
   const seller = mapBlingSeller(response?.data);
   if (!seller) {
-    throw new Error("O vendedor selecionado não está ativo ou não existe mais no Bling.");
+    throw new Error(
+      "O vendedor selecionado não está ativo ou não existe mais no Bling.",
+    );
   }
 
   return seller;
 }
 
-export async function searchBlingContacts(query: string): Promise<BlingContactResult[]> {
+export async function searchBlingContacts(
+  query: string,
+): Promise<BlingContactResult[]> {
   const params = new URLSearchParams({
     criterio: "1",
     limite: "20",
@@ -520,23 +606,31 @@ export async function searchBlingContacts(query: string): Promise<BlingContactRe
     params.set("pesquisa", search);
   }
 
-  const response = await blingFetch<{ data?: unknown }>(`/contatos?${params.toString()}`);
+  const response = await blingFetch<{ data?: unknown }>(
+    `/contatos?${params.toString()}`,
+  );
 
   return asBlingList(response?.data)
     .map(mapBlingContact)
     .filter((contact): contact is BlingContactResult => Boolean(contact));
 }
 
-export async function getBlingContactById(id: string): Promise<BlingContactResult> {
+export async function getBlingContactById(
+  id: string,
+): Promise<BlingContactResult> {
   const numericId = parseBlingNumericId(id);
   if (!numericId) {
     throw new Error("Selecione um cliente válido do Bling.");
   }
 
-  const response = await blingFetch<{ data?: unknown }>(`/contatos/${numericId}`);
+  const response = await blingFetch<{ data?: unknown }>(
+    `/contatos/${numericId}`,
+  );
   const contact = mapBlingContact(response?.data);
   if (!contact) {
-    throw new Error("O cliente selecionado não está ativo ou não existe mais no Bling.");
+    throw new Error(
+      "O cliente selecionado não está ativo ou não existe mais no Bling.",
+    );
   }
 
   return contact;
@@ -548,7 +642,9 @@ async function findBlingSellerIdByName(sellerName: string): Promise<number> {
     situacaoContato: "A",
     limite: "100",
   });
-  const response = await blingFetch<{ data?: unknown }>(`/vendedores?${params.toString()}`);
+  const response = await blingFetch<{ data?: unknown }>(
+    `/vendedores?${params.toString()}`,
+  );
   const sellers = asBlingList(response?.data);
   const normalizedSellerName = normalizeName(sellerName);
   const matches = sellers.filter((candidate) => {
@@ -576,8 +672,13 @@ async function findBlingSellerIdByName(sellerName: string): Promise<number> {
 async function getBlingOrderDetails(
   orderId: BlingOrderSearchResult["id"],
 ): Promise<BlingOrder | null> {
-  const response = await blingFetch<{ data?: unknown }>(`/pedidos/vendas/${orderId}`);
-  const order = response?.data && typeof response.data === "object" ? response.data : response;
+  const response = await blingFetch<{ data?: unknown }>(
+    `/pedidos/vendas/${orderId}`,
+  );
+  const order =
+    response?.data && typeof response.data === "object"
+      ? response.data
+      : response;
 
   if (!order || typeof order !== "object") {
     console.log("[bling] Order not found or response without id");
@@ -705,7 +806,11 @@ export async function processBlingOrderSync(sync: BlingOrderSync) {
     blingContactId,
     storeFieldOmitted: true,
   });
-  await updateBlingOrderAssignments(blingOrderDetails, blingSellerId, blingContactId);
+  await updateBlingOrderAssignments(
+    blingOrderDetails,
+    blingSellerId,
+    blingContactId,
+  );
   console.log("[bling] Bling order update completed", {
     syncId: sync.id,
     blingOrderId: blingOrderDetails.id,

@@ -1,10 +1,17 @@
 import { useEffect, useMemo, useState } from "react";
 import { useFetcher } from "react-router";
-import type { ActionFunctionArgs, HeadersFunction, LoaderFunctionArgs } from "react-router";
+import type {
+  ActionFunctionArgs,
+  HeadersFunction,
+  LoaderFunctionArgs,
+} from "react-router";
 import { boundary } from "@shopify/shopify-app-react-router/server";
 
 import { authenticate } from "../shopify.server";
-import { getBlingContactById, getBlingSellerById } from "../services/bling.server";
+import {
+  getBlingContactById,
+  getBlingSellerById,
+} from "../services/bling.server";
 import { createDraftOrder } from "../services/shopify/draft-orders.server";
 
 type CustomerResult = {
@@ -67,13 +74,20 @@ export const loader = async ({ request }: LoaderFunctionArgs) => {
 export const action = async ({ request }: ActionFunctionArgs) => {
   try {
     if (request.method !== "POST") {
-      return Response.json({ success: false, message: "Método inválido" }, { status: 405 });
+      return Response.json(
+        { success: false, message: "Método inválido" },
+        { status: 405 },
+      );
     }
 
     await authenticate.admin(request);
     const payload = await request.json();
 
-    if (!payload || !Array.isArray(payload.items) || payload.items.length === 0) {
+    if (
+      !payload ||
+      !Array.isArray(payload.items) ||
+      payload.items.length === 0
+    ) {
       return Response.json(
         { success: false, message: "Adicione ao menos um produto" },
         { status: 400 },
@@ -99,7 +113,10 @@ export const action = async ({ request }: ActionFunctionArgs) => {
       const quantity = Math.max(1, Number(item.quantity || 1));
       const engravings = Array.isArray(item.engravings) ? item.engravings : [];
 
-      if (!engravings.length || engravings.every((value: unknown) => !String(value ?? "").trim())) {
+      if (
+        !engravings.length ||
+        engravings.every((value: unknown) => !String(value ?? "").trim())
+      ) {
         return [
           {
             variantId: item.variantId,
@@ -116,7 +133,9 @@ export const action = async ({ request }: ActionFunctionArgs) => {
           variantId: item.variantId,
           quantity: 1,
           priceOverride: String(item.originalUnitPrice || "0"),
-          ...(value ? { customAttributes: [{ key: "Personalização", value }] } : {}),
+          ...(value
+            ? { customAttributes: [{ key: "Personalização", value }] }
+            : {}),
         };
       });
     });
@@ -155,7 +174,9 @@ export const action = async ({ request }: ActionFunctionArgs) => {
       {
         success: false,
         message:
-          actionError instanceof Error ? actionError.message : "Erro interno ao criar o pedido.",
+          actionError instanceof Error
+            ? actionError.message
+            : "Erro interno ao criar o pedido.",
       },
       { status: 500 },
     );
@@ -165,12 +186,15 @@ export const action = async ({ request }: ActionFunctionArgs) => {
 export default function Index() {
   const [sellerQuery, setSellerQuery] = useState("");
   const [sellerResults, setSellerResults] = useState<SellerResult[]>([]);
-  const [selectedSeller, setSelectedSeller] = useState<SellerResult | null>(null);
+  const [selectedSeller, setSelectedSeller] = useState<SellerResult | null>(
+    null,
+  );
   const [sellerLoading, setSellerLoading] = useState(false);
   const [sellerError, setSellerError] = useState("");
   const [customerQuery, setCustomerQuery] = useState("");
   const [customerResults, setCustomerResults] = useState<CustomerResult[]>([]);
-  const [selectedCustomer, setSelectedCustomer] = useState<CustomerResult | null>(null);
+  const [selectedCustomer, setSelectedCustomer] =
+    useState<CustomerResult | null>(null);
   const [isCustomerOpen, setIsCustomerOpen] = useState(false);
   const [customerLoading, setCustomerLoading] = useState(false);
   const [customerError, setCustomerError] = useState("");
@@ -189,15 +213,19 @@ export default function Index() {
   const draftOrderFetcher = useFetcher<any>();
 
   useEffect(() => {
+    const controller = new AbortController();
+    let active = true;
     const timeout = window.setTimeout(async () => {
       if (!sellerQuery.trim()) {
         setSellerResults([]);
+        setSellerError("");
         setSellerLoading(false);
         return;
       }
 
       setSellerLoading(true);
       setSellerError("");
+      setSellerResults([]);
 
       try {
         const response = await fetch(
@@ -205,20 +233,55 @@ export default function Index() {
             ...Object.fromEntries(new URLSearchParams(window.location.search)),
             query: sellerQuery,
           }).toString()}`,
-          { credentials: "include" },
+          { credentials: "include", signal: controller.signal },
         );
+        const payload = (await response.json().catch(() => null)) as
+          SellerResult[] | { message?: string } | null;
+
         if (!response.ok) {
-          throw new Error("Não foi possível buscar vendedores.");
+          throw new Error(
+            payload && !Array.isArray(payload) && payload.message
+              ? payload.message
+              : "Não foi possível buscar vendedores.",
+          );
         }
-        setSellerResults((await response.json()) as SellerResult[]);
-      } catch {
-        setSellerError("Não foi possível carregar vendedores.");
+
+        if (!Array.isArray(payload)) {
+          throw new Error(
+            "O Bling retornou uma resposta inválida para a busca de vendedores.",
+          );
+        }
+
+        if (active) {
+          setSellerResults(payload);
+        }
+      } catch (requestError) {
+        if (
+          requestError instanceof DOMException &&
+          requestError.name === "AbortError"
+        ) {
+          return;
+        }
+
+        if (active) {
+          setSellerError(
+            requestError instanceof Error
+              ? requestError.message
+              : "Não foi possível carregar vendedores.",
+          );
+        }
       } finally {
-        setSellerLoading(false);
+        if (active) {
+          setSellerLoading(false);
+        }
       }
     }, 300);
 
-    return () => window.clearTimeout(timeout);
+    return () => {
+      active = false;
+      controller.abort();
+      window.clearTimeout(timeout);
+    };
   }, [sellerQuery]);
 
   useEffect(() => {
@@ -257,7 +320,9 @@ export default function Index() {
       setCustomerError("");
 
       try {
-        const response = await fetch(`/api/customers?query=${encodeURIComponent(customerQuery)}`);
+        const response = await fetch(
+          `/api/customers?query=${encodeURIComponent(customerQuery)}`,
+        );
 
         if (!response.ok) {
           throw new Error("Não foi possível buscar clientes");
@@ -286,7 +351,9 @@ export default function Index() {
       setProductLoading(true);
 
       try {
-        const response = await fetch(`/api/products?query=${encodeURIComponent(productQuery)}`);
+        const response = await fetch(
+          `/api/products?query=${encodeURIComponent(productQuery)}`,
+        );
 
         if (!response.ok) {
           throw new Error("Erro ao buscar produtos");
@@ -306,7 +373,10 @@ export default function Index() {
 
   const subtotal = useMemo(
     () =>
-      orderItems.reduce((total, item) => total + Number(item.displayPrice || 0) * item.quantity, 0),
+      orderItems.reduce(
+        (total, item) => total + Number(item.displayPrice || 0) * item.quantity,
+        0,
+      ),
     [orderItems],
   );
 
@@ -378,7 +448,9 @@ export default function Index() {
   };
 
   const removeItem = (localId: string) => {
-    setOrderItems((current) => current.filter((item) => item.localId !== localId));
+    setOrderItems((current) =>
+      current.filter((item) => item.localId !== localId),
+    );
   };
 
   const handleCreateDraftOrder = async () => {
@@ -410,7 +482,8 @@ export default function Index() {
     );
   };
 
-  const canCreateOrder = Boolean(selectedSeller) && orderItems.length > 0 && !isCreating;
+  const canCreateOrder =
+    Boolean(selectedSeller) && orderItems.length > 0 && !isCreating;
 
   return (
     <s-page heading="Novo Pedido" inlineSize="large">
@@ -422,33 +495,50 @@ export default function Index() {
               <s-text-field
                 label="Buscar vendedor no Bling"
                 value={sellerQuery}
-                onInput={(event: any) => setSellerQuery(event.target.value || "")}
+                onInput={(event: any) =>
+                  setSellerQuery(event.target.value || "")
+                }
               />
               {sellerLoading && <s-paragraph>Buscando vendedores…</s-paragraph>}
-              {sellerError && <s-banner tone="critical">{sellerError}</s-banner>}
+              {sellerError && (
+                <s-banner tone="critical">{sellerError}</s-banner>
+              )}
               {sellerResults.length > 0 && (
                 <s-stack direction="block" gap="base">
                   {sellerResults.map((seller) => (
-                    <s-box key={seller.id} padding="base" borderWidth="base" borderRadius="base">
+                    <s-box
+                      key={seller.id}
+                      padding="base"
+                      borderWidth="base"
+                      borderRadius="base"
+                    >
                       <s-stack direction="block" gap="base">
                         <s-text>{seller.name}</s-text>
-                        <s-button onClick={() => setSelectedSeller(seller)}>Selecionar</s-button>
+                        <s-button onClick={() => setSelectedSeller(seller)}>
+                          Selecionar
+                        </s-button>
                       </s-stack>
                     </s-box>
                   ))}
                 </s-stack>
               )}
-              {sellerQuery.trim() && !sellerLoading && sellerResults.length === 0 && (
-                <s-paragraph color="subdued">
-                  Nenhum vendedor ativo encontrado no Bling.
-                </s-paragraph>
-              )}
+              {sellerQuery.trim() &&
+                !sellerLoading &&
+                !sellerError &&
+                sellerResults.length === 0 && (
+                  <s-paragraph color="subdued">
+                    Nenhum vendedor ativo encontrado no Bling.
+                  </s-paragraph>
+                )}
             </>
           ) : (
             <s-box padding="base" borderWidth="base" borderRadius="base">
               <s-stack direction="block" gap="base">
                 <s-text>{selectedSeller.name}</s-text>
-                <s-button variant="tertiary" onClick={() => setSelectedSeller(null)}>
+                <s-button
+                  variant="tertiary"
+                  onClick={() => setSelectedSeller(null)}
+                >
                   Trocar vendedor
                 </s-button>
               </s-stack>
@@ -464,7 +554,9 @@ export default function Index() {
             <s-button
               variant="tertiary"
               icon={isCustomerOpen ? "chevron-up" : "chevron-down"}
-              accessibilityLabel={isCustomerOpen ? "Esconder cliente" : "Mostrar cliente"}
+              accessibilityLabel={
+                isCustomerOpen ? "Esconder cliente" : "Mostrar cliente"
+              }
               onClick={() => setIsCustomerOpen((current) => !current)}
             />
           </s-stack>
@@ -475,11 +567,17 @@ export default function Index() {
                 <s-text-field
                   label="Buscar cliente no Bling"
                   value={customerQuery}
-                  onInput={(event: any) => setCustomerQuery(event.target.value || "")}
+                  onInput={(event: any) =>
+                    setCustomerQuery(event.target.value || "")
+                  }
                 />
 
-                {customerLoading && <s-paragraph>Buscando clientes…</s-paragraph>}
-                {customerError && <s-banner tone="critical">{customerError}</s-banner>}
+                {customerLoading && (
+                  <s-paragraph>Buscando clientes…</s-paragraph>
+                )}
+                {customerError && (
+                  <s-banner tone="critical">{customerError}</s-banner>
+                )}
 
                 {customerResults.length > 0 && (
                   <s-stack direction="block" gap="base">
@@ -492,10 +590,14 @@ export default function Index() {
                       >
                         <s-stack direction="block" gap="base">
                           <s-text>{customer.name}</s-text>
-                          {customer.document && <s-text>CPF/CNPJ: {customer.document}</s-text>}
+                          {customer.document && (
+                            <s-text>CPF/CNPJ: {customer.document}</s-text>
+                          )}
                           {customer.email && <s-text>{customer.email}</s-text>}
                           {customer.phone && <s-text>{customer.phone}</s-text>}
-                          <s-button onClick={() => setSelectedCustomer(customer)}>
+                          <s-button
+                            onClick={() => setSelectedCustomer(customer)}
+                          >
                             Selecionar
                           </s-button>
                         </s-stack>
@@ -503,11 +605,13 @@ export default function Index() {
                     ))}
                   </s-stack>
                 )}
-                {customerQuery.trim() && !customerLoading && customerResults.length === 0 && (
-                  <s-paragraph color="subdued">
-                    Nenhum cliente ativo encontrado no Bling.
-                  </s-paragraph>
-                )}
+                {customerQuery.trim() &&
+                  !customerLoading &&
+                  customerResults.length === 0 && (
+                    <s-paragraph color="subdued">
+                      Nenhum cliente ativo encontrado no Bling.
+                    </s-paragraph>
+                  )}
               </>
             ) : (
               <s-box padding="base" borderWidth="base" borderRadius="base">
@@ -516,9 +620,16 @@ export default function Index() {
                   {selectedCustomer.document && (
                     <s-text>CPF/CNPJ: {selectedCustomer.document}</s-text>
                   )}
-                  {selectedCustomer.email && <s-text>{selectedCustomer.email}</s-text>}
-                  {selectedCustomer.phone && <s-text>{selectedCustomer.phone}</s-text>}
-                  <s-button variant="tertiary" onClick={() => setSelectedCustomer(null)}>
+                  {selectedCustomer.email && (
+                    <s-text>{selectedCustomer.email}</s-text>
+                  )}
+                  {selectedCustomer.phone && (
+                    <s-text>{selectedCustomer.phone}</s-text>
+                  )}
+                  <s-button
+                    variant="tertiary"
+                    onClick={() => setSelectedCustomer(null)}
+                  >
                     Trocar cliente
                   </s-button>
                 </s-stack>
@@ -533,7 +644,9 @@ export default function Index() {
             <s-icon type="product" />
             <s-stack direction="block" gap="small">
               <s-heading>Produtos</s-heading>
-              <s-paragraph color="subdued">Busque e adicione produtos ao pedido.</s-paragraph>
+              <s-paragraph color="subdued">
+                Busque e adicione produtos ao pedido.
+              </s-paragraph>
             </s-stack>
           </s-stack>
 
@@ -561,13 +674,17 @@ export default function Index() {
                   alignItems="end"
                 >
                   <s-stack direction="inline" gap="small" alignItems="center">
-                    <s-text>{productResults.length} produtos encontrados para</s-text>
+                    <s-text>
+                      {productResults.length} produtos encontrados para
+                    </s-text>
                     <s-text type="strong">“{productQuery.trim()}”</s-text>
                   </s-stack>
                   <s-select
                     label="Ordenar por"
                     value={productSort}
-                    onChange={(event: any) => setProductSort(event.target.value as ProductSort)}
+                    onChange={(event: any) =>
+                      setProductSort(event.target.value as ProductSort)
+                    }
                   >
                     <s-option value="relevance">Mais relevantes</s-option>
                     <s-option value="price-asc">Menor preço</s-option>
@@ -584,7 +701,11 @@ export default function Index() {
                 >
                   {sortedProductResults.map((product) => (
                     <s-grid-item key={product.id}>
-                      <s-box padding="base" borderWidth="base" borderRadius="base">
+                      <s-box
+                        padding="base"
+                        borderWidth="base"
+                        borderRadius="base"
+                      >
                         <s-stack direction="block" gap="base">
                           <s-grid
                             gridTemplateColumns="112px minmax(0, 1fr)"
@@ -613,7 +734,8 @@ export default function Index() {
                                   display: "grid",
                                   placeItems: "center",
                                   borderRadius: 8,
-                                  background: "var(--p-color-bg-surface-secondary, #f1f1f1)",
+                                  background:
+                                    "var(--p-color-bg-surface-secondary, #f1f1f1)",
                                 }}
                               >
                                 <s-icon type="product" tone="neutral" />
@@ -621,10 +743,18 @@ export default function Index() {
                             )}
 
                             <s-stack direction="block" gap="base">
-                              <s-text type="strong">{product.productTitle}</s-text>
-                              <s-text color="subdued">{product.variantTitle}</s-text>
-                              <s-text color="subdued">SKU: {product.sku || "—"}</s-text>
-                              <s-text type="strong">{formatPrice(product.price)}</s-text>
+                              <s-text type="strong">
+                                {product.productTitle}
+                              </s-text>
+                              <s-text color="subdued">
+                                {product.variantTitle}
+                              </s-text>
+                              <s-text color="subdued">
+                                SKU: {product.sku || "—"}
+                              </s-text>
+                              <s-text type="strong">
+                                {formatPrice(product.price)}
+                              </s-text>
                             </s-stack>
                           </s-grid>
 
@@ -645,17 +775,20 @@ export default function Index() {
 
               <s-stack direction="inline" justifyContent="center">
                 <s-paragraph color="subdued">
-                  Mostrando {sortedProductResults.length} de {productResults.length} produtos
+                  Mostrando {sortedProductResults.length} de{" "}
+                  {productResults.length} produtos
                 </s-paragraph>
               </s-stack>
             </>
           )}
 
-          {!productLoading && productQuery.trim() && productResults.length === 0 && (
-            <s-paragraph color="subdued">
-              Nenhum produto encontrado para “{productQuery.trim()}”.
-            </s-paragraph>
-          )}
+          {!productLoading &&
+            productQuery.trim() &&
+            productResults.length === 0 && (
+              <s-paragraph color="subdued">
+                Nenhum produto encontrado para “{productQuery.trim()}”.
+              </s-paragraph>
+            )}
         </s-stack>
       </s-section>
 
@@ -666,7 +799,12 @@ export default function Index() {
             <s-paragraph>Nenhum produto adicionado.</s-paragraph>
           ) : (
             orderItems.map((item) => (
-              <s-box key={item.localId} padding="base" borderWidth="base" borderRadius="base">
+              <s-box
+                key={item.localId}
+                padding="base"
+                borderWidth="base"
+                borderRadius="base"
+              >
                 <s-stack direction="block" gap="base">
                   <s-stack direction="inline" gap="base">
                     {item.image && (
@@ -699,10 +837,17 @@ export default function Index() {
                     </s-stack>
                   </s-stack>
                   <s-stack direction="inline" gap="base">
-                    <s-button onClick={() => adjustQuantity(item.localId, -1)}>-</s-button>
+                    <s-button onClick={() => adjustQuantity(item.localId, -1)}>
+                      -
+                    </s-button>
                     <s-text>{item.quantity}</s-text>
-                    <s-button onClick={() => adjustQuantity(item.localId, 1)}>+</s-button>
-                    <s-button variant="tertiary" onClick={() => removeItem(item.localId)}>
+                    <s-button onClick={() => adjustQuantity(item.localId, 1)}>
+                      +
+                    </s-button>
+                    <s-button
+                      variant="tertiary"
+                      onClick={() => removeItem(item.localId)}
+                    >
                       Remover
                     </s-button>
                   </s-stack>
@@ -713,7 +858,11 @@ export default function Index() {
                       label={`Unidade ${index + 1}`}
                       value={item.engravings[index] || ""}
                       onInput={(event: any) =>
-                        updateEngraving(item.localId, index, event.target.value || "")
+                        updateEngraving(
+                          item.localId,
+                          index,
+                          event.target.value || "",
+                        )
                       }
                     />
                   ))}
@@ -726,13 +875,19 @@ export default function Index() {
 
       <s-section>
         <s-heading>Observações (Opcional)</s-heading>
-        <s-text-field value={note} onInput={(event: any) => setNote(event.target.value || "")} />
+        <s-text-field
+          value={note}
+          onInput={(event: any) => setNote(event.target.value || "")}
+        />
       </s-section>
 
       <s-section>
         <s-stack direction="block" gap="base">
           <s-heading>Resumo do pedido</s-heading>
-          <s-text>Cliente: {selectedCustomer ? selectedCustomer.name : "Guest checkout"}</s-text>
+          <s-text>
+            Cliente:{" "}
+            {selectedCustomer ? selectedCustomer.name : "Guest checkout"}
+          </s-text>
           <s-text>Vendedor: {selectedSeller?.name || "Não selecionado"}</s-text>
           <s-text>Subtotal dos produtos: {formatPrice(subtotal)}</s-text>
           <s-text>Frete: calculado no checkout</s-text>
