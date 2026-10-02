@@ -1,11 +1,20 @@
 import { authenticate } from "../../shopify.server";
 import type { BlingContactAddress, BlingContactResult } from "../bling.server";
 
+export type DraftOrderShipping =
+  | {
+      mode: "manual";
+      service: "PAC" | "SEDEX" | "Outro";
+      amount: string;
+    }
+  | { mode: "automatic" }
+  | { mode: "none" };
+
 export type DraftOrderInput = {
   customer?: BlingContactResult | null;
-  note?: string | null;
   sellerId: string;
   sellerName: string;
+  shipping: DraftOrderShipping;
   items: Array<{
     variantId: string;
     quantity: number;
@@ -96,7 +105,6 @@ export async function createDraftOrder(request: Request, input: DraftOrderInput)
   };
   const currencyCode = shopPayload.data?.shop?.currencyCode || "BRL";
   const note = [
-    input.note?.trim(),
     `Vendedor Bling: ${input.sellerName}`,
     input.customer ? `Cliente Bling: ${input.customer.name}` : null,
   ]
@@ -128,6 +136,30 @@ export async function createDraftOrder(request: Request, input: DraftOrderInput)
       ? { customAttributes: item.customAttributes }
       : {}),
   }));
+  const shippingLine =
+    input.shipping.mode === "manual"
+      ? {
+          title: input.shipping.service,
+          priceWithCurrency: {
+            amount: input.shipping.amount,
+            currencyCode,
+          },
+        }
+      : input.shipping.mode === "none"
+        ? {
+            title: "Entrega combinada",
+            priceWithCurrency: {
+              amount: "0.00",
+              currencyCode,
+            },
+          }
+        : null;
+  const shippingService =
+    input.shipping.mode === "manual"
+      ? input.shipping.service
+      : input.shipping.mode === "none"
+        ? "Entrega combinada"
+        : null;
 
   const response = await admin.graphql(
     `#graphql
@@ -155,6 +187,10 @@ export async function createDraftOrder(request: Request, input: DraftOrderInput)
           customAttributes: [
             { key: "vendedor", value: input.sellerName },
             { key: "_bling_seller_id", value: input.sellerId },
+            { key: "_shipping_mode", value: input.shipping.mode },
+            ...(shippingService
+              ? [{ key: "_shipping_service", value: shippingService }]
+              : []),
             ...(input.customer
               ? [
                   { key: "cliente_bling", value: input.customer.name },
@@ -163,6 +199,7 @@ export async function createDraftOrder(request: Request, input: DraftOrderInput)
               : []),
           ],
           lineItems,
+          ...(shippingLine ? { shippingLine } : {}),
         },
       },
     },

@@ -12,7 +12,10 @@ import {
   getBlingContactById,
   getBlingSellerById,
 } from "../services/bling.server";
-import { createDraftOrder } from "../services/shopify/draft-orders.server";
+import {
+  createDraftOrder,
+  type DraftOrderShipping,
+} from "../services/shopify/draft-orders.server";
 
 type CustomerResult = {
   id: string;
@@ -37,6 +40,8 @@ type ProductResult = {
 };
 
 type ProductSort = "relevance" | "price-asc" | "price-desc" | "title";
+type ShippingMode = "manual" | "automatic" | "none";
+type ManualShippingService = "PAC" | "SEDEX" | "Outro";
 
 type OrderItem = {
   localId: string;
@@ -56,6 +61,16 @@ const formatPrice = (value: string | number) => {
     style: "currency",
     currency: "BRL",
   }).format(Number.isFinite(numeric) ? numeric : 0);
+};
+
+const normalizeShippingAmount = (value: unknown) => {
+  const normalized = String(value ?? "").trim().replace(",", ".");
+  if (!normalized) {
+    return null;
+  }
+
+  const amount = Number(normalized);
+  return Number.isFinite(amount) && amount >= 0 ? amount.toFixed(2) : null;
 };
 
 const generateLocalId = () => {
@@ -104,6 +119,48 @@ export const action = async ({ request }: ActionFunctionArgs) => {
       );
     }
 
+    let shipping: DraftOrderShipping;
+    if (payload.shippingMode === "manual") {
+      const shippingAmount = normalizeShippingAmount(payload.shippingAmount);
+      const shippingService = ["PAC", "SEDEX", "Outro"].includes(
+        payload.shippingService,
+      )
+        ? (payload.shippingService as ManualShippingService)
+        : null;
+
+      if (!shippingAmount) {
+        return Response.json(
+          {
+            success: false,
+            message: "Informe um valor de frete válido, igual ou maior que zero.",
+          },
+          { status: 400 },
+        );
+      }
+
+      if (!shippingService) {
+        return Response.json(
+          { success: false, message: "Selecione a modalidade do frete manual." },
+          { status: 400 },
+        );
+      }
+
+      shipping = {
+        mode: "manual",
+        service: shippingService,
+        amount: shippingAmount,
+      };
+    } else if (payload.shippingMode === "automatic") {
+      shipping = { mode: "automatic" };
+    } else if (payload.shippingMode === "none") {
+      shipping = { mode: "none" };
+    } else {
+      return Response.json(
+        { success: false, message: "Selecione uma modalidade de frete válida." },
+        { status: 400 },
+      );
+    }
+
     const seller = await getBlingSellerById(String(payload.sellerId));
     const customer = payload.blingContactId
       ? await getBlingContactById(String(payload.blingContactId))
@@ -142,9 +199,9 @@ export const action = async ({ request }: ActionFunctionArgs) => {
 
     const result = await createDraftOrder(request, {
       customer,
-      note: payload.note || "",
       sellerId: seller.id,
       sellerName: seller.name,
+      shipping,
       items: lineItems,
     });
 
@@ -203,7 +260,11 @@ export default function Index() {
   const [productLoading, setProductLoading] = useState(false);
   const [productSort, setProductSort] = useState<ProductSort>("relevance");
   const [orderItems, setOrderItems] = useState<OrderItem[]>([]);
-  const [note, setNote] = useState("");
+  const [shippingMode, setShippingMode] =
+    useState<ShippingMode>("automatic");
+  const [shippingService, setShippingService] =
+    useState<ManualShippingService>("PAC");
+  const [manualShippingPrice, setManualShippingPrice] = useState("");
   const [error, setError] = useState("");
   const [success, setSuccess] = useState<{
     name: string;
@@ -379,6 +440,14 @@ export default function Index() {
       ),
     [orderItems],
   );
+  const normalizedManualShippingAmount = useMemo(
+    () => normalizeShippingAmount(manualShippingPrice),
+    [manualShippingPrice],
+  );
+  const definedShippingAmount =
+    shippingMode === "manual"
+      ? Number(normalizedManualShippingAmount || 0)
+      : 0;
 
   const sortedProductResults = useMemo(() => {
     if (productSort === "relevance") {
@@ -453,6 +522,20 @@ export default function Index() {
     );
   };
 
+  const handleShippingModeChange = (event: any) => {
+    const nextMode = event.currentTarget.values?.[0] as
+      | ShippingMode
+      | undefined;
+    if (!nextMode || !["manual", "automatic", "none"].includes(nextMode)) {
+      return;
+    }
+
+    setShippingMode(nextMode);
+    if (nextMode !== "manual") {
+      setManualShippingPrice("");
+    }
+  };
+
   const handleCreateDraftOrder = async () => {
     if (!selectedSeller) {
       setError("Selecione o vendedor responsável pelo pedido.");
@@ -464,13 +547,24 @@ export default function Index() {
       return;
     }
 
+    if (shippingMode === "manual" && !normalizedManualShippingAmount) {
+      setError("Informe um valor de frete válido, igual ou maior que zero.");
+      return;
+    }
+
     setError("");
 
     draftOrderFetcher.submit(
       JSON.stringify({
         sellerId: selectedSeller.id,
         blingContactId: selectedCustomer?.id ?? null,
-        note,
+        shippingMode,
+        ...(shippingMode === "manual"
+          ? {
+              shippingService,
+              shippingAmount: normalizedManualShippingAmount,
+            }
+          : {}),
         items: orderItems.map((item) => ({
           variantId: item.variantId,
           quantity: item.quantity,
@@ -874,11 +968,43 @@ export default function Index() {
       </s-section>
 
       <s-section>
-        <s-heading>Observações (Opcional)</s-heading>
-        <s-text-field
-          value={note}
-          onInput={(event: any) => setNote(event.target.value || "")}
-        />
+        <s-stack direction="block" gap="base">
+          <s-heading>Entrega e frete</s-heading>
+          <s-choice-list
+            label="Modalidade de frete"
+            name="shipping-mode"
+            values={[shippingMode]}
+            onChange={handleShippingModeChange}
+          >
+            <s-choice value="manual">Frete manual</s-choice>
+            <s-choice value="automatic">Frete automático</s-choice>
+            <s-choice value="none">Sem frete</s-choice>
+          </s-choice-list>
+          <s-number-field
+            label="Valor do frete (R$)"
+            value={manualShippingPrice}
+            min={0}
+            step={0.01}
+            disabled={shippingMode !== "manual"}
+            onInput={(event: any) =>
+              setManualShippingPrice(event.currentTarget.value || "")
+            }
+          />
+          <s-select
+            label="Modalidade do frete manual"
+            value={shippingService}
+            disabled={shippingMode !== "manual"}
+            onChange={(event: any) =>
+              setShippingService(
+                event.currentTarget.value as ManualShippingService,
+              )
+            }
+          >
+            <s-option value="PAC">PAC</s-option>
+            <s-option value="SEDEX">SEDEX</s-option>
+            <s-option value="Outro">Outro</s-option>
+          </s-select>
+        </s-stack>
       </s-section>
 
       <s-section>
@@ -890,7 +1016,28 @@ export default function Index() {
           </s-text>
           <s-text>Vendedor: {selectedSeller?.name || "Não selecionado"}</s-text>
           <s-text>Subtotal dos produtos: {formatPrice(subtotal)}</s-text>
-          <s-text>Frete: calculado no checkout</s-text>
+          {shippingMode === "manual" ? (
+            <>
+              <s-text>
+                Frete ({shippingService}):{" "}
+                {normalizedManualShippingAmount
+                  ? formatPrice(normalizedManualShippingAmount)
+                  : "Informe o valor"}
+              </s-text>
+              {normalizedManualShippingAmount ? (
+                <s-text>
+                  Total estimado: {formatPrice(subtotal + definedShippingAmount)}
+                </s-text>
+              ) : null}
+            </>
+          ) : shippingMode === "none" ? (
+            <>
+              <s-text>Frete: Entrega combinada — Grátis</s-text>
+              <s-text>Total estimado: {formatPrice(subtotal)}</s-text>
+            </>
+          ) : (
+            <s-text>Frete: calculado no checkout</s-text>
+          )}
           {error && <s-banner tone="critical">{error}</s-banner>}
           {success ? (
             <s-banner tone="success">
