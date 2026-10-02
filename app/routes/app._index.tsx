@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { useFetcher } from "react-router";
 import type {
   ActionFunctionArgs,
@@ -270,7 +270,12 @@ export default function Index() {
     name: string;
     invoiceUrl: string;
   } | null>(null);
+  const [checkoutLinkCopied, setCheckoutLinkCopied] = useState(false);
   const [isCreating, setIsCreating] = useState(false);
+  const [lastSubmittedFingerprint, setLastSubmittedFingerprint] = useState<
+    string | null
+  >(null);
+  const submissionLockRef = useRef(false);
   const draftOrderFetcher = useFetcher<any>();
 
   useEffect(() => {
@@ -358,14 +363,18 @@ export default function Index() {
     const result = draftOrderFetcher.data;
     if (!result.success) {
       setError(result.message || "Não foi possível criar o pedido.");
+      setLastSubmittedFingerprint(null);
+      submissionLockRef.current = false;
       setIsCreating(false);
       return;
     }
 
+    setCheckoutLinkCopied(false);
     setSuccess({
       name: result.draftOrder.name || "Pedido",
       invoiceUrl: result.draftOrder.invoiceUrl,
     });
+    submissionLockRef.current = false;
     setIsCreating(false);
   }, [draftOrderFetcher.data, draftOrderFetcher.state]);
 
@@ -448,6 +457,31 @@ export default function Index() {
     shippingMode === "manual"
       ? Number(normalizedManualShippingAmount || 0)
       : 0;
+  const orderFingerprint = useMemo(
+    () =>
+      JSON.stringify({
+        sellerId: selectedSeller?.id ?? null,
+        customerId: selectedCustomer?.id ?? null,
+        shippingMode,
+        shippingService: shippingMode === "manual" ? shippingService : null,
+        shippingAmount:
+          shippingMode === "manual" ? normalizedManualShippingAmount : null,
+        items: orderItems.map((item) => ({
+          variantId: item.variantId,
+          quantity: item.quantity,
+          price: item.displayPrice,
+          engravings: item.engravings,
+        })),
+      }),
+    [
+      normalizedManualShippingAmount,
+      orderItems,
+      selectedCustomer?.id,
+      selectedSeller?.id,
+      shippingMode,
+      shippingService,
+    ],
+  );
 
   const sortedProductResults = useMemo(() => {
     if (productSort === "relevance") {
@@ -537,6 +571,13 @@ export default function Index() {
   };
 
   const handleCreateDraftOrder = async () => {
+    if (
+      submissionLockRef.current ||
+      lastSubmittedFingerprint === orderFingerprint
+    ) {
+      return;
+    }
+
     if (!selectedSeller) {
       setError("Selecione o vendedor responsável pelo pedido.");
       return;
@@ -553,31 +594,70 @@ export default function Index() {
     }
 
     setError("");
+    setCheckoutLinkCopied(false);
+    submissionLockRef.current = true;
+    setIsCreating(true);
+    setLastSubmittedFingerprint(orderFingerprint);
 
-    draftOrderFetcher.submit(
-      JSON.stringify({
-        sellerId: selectedSeller.id,
-        blingContactId: selectedCustomer?.id ?? null,
-        shippingMode,
-        ...(shippingMode === "manual"
-          ? {
-              shippingService,
-              shippingAmount: normalizedManualShippingAmount,
-            }
-          : {}),
-        items: orderItems.map((item) => ({
-          variantId: item.variantId,
-          quantity: item.quantity,
-          originalUnitPrice: item.displayPrice,
-          engravings: item.engravings,
-        })),
-      }),
-      { method: "post", encType: "application/json" },
-    );
+    try {
+      draftOrderFetcher.submit(
+        JSON.stringify({
+          sellerId: selectedSeller.id,
+          blingContactId: selectedCustomer?.id ?? null,
+          shippingMode,
+          ...(shippingMode === "manual"
+            ? {
+                shippingService,
+                shippingAmount: normalizedManualShippingAmount,
+              }
+            : {}),
+          items: orderItems.map((item) => ({
+            variantId: item.variantId,
+            quantity: item.quantity,
+            originalUnitPrice: item.displayPrice,
+            engravings: item.engravings,
+          })),
+        }),
+        { method: "post", encType: "application/json" },
+      );
+    } catch (submitError) {
+      submissionLockRef.current = false;
+      setIsCreating(false);
+      setLastSubmittedFingerprint(null);
+      setError(
+        submitError instanceof Error
+          ? submitError.message
+          : "Não foi possível iniciar a criação do pedido.",
+      );
+    }
   };
 
+  const handleCopyCheckoutLink = async () => {
+    if (!success?.invoiceUrl) {
+      return;
+    }
+
+    try {
+      if (!navigator.clipboard) {
+        throw new Error("Clipboard API indisponível");
+      }
+      await navigator.clipboard.writeText(success.invoiceUrl);
+      setCheckoutLinkCopied(true);
+      setError("");
+    } catch {
+      setCheckoutLinkCopied(false);
+      setError("Não foi possível copiar o link. Copie o endereço manualmente.");
+    }
+  };
+
+  const currentOrderAlreadySubmitted =
+    lastSubmittedFingerprint === orderFingerprint;
+
   const canCreateOrder =
-    Boolean(selectedSeller) && orderItems.length > 0 && !isCreating;
+    Boolean(selectedSeller) &&
+    orderItems.length > 0 &&
+    !isCreating &&
+    !currentOrderAlreadySubmitted;
 
   return (
     <s-page heading="Novo Pedido" inlineSize="large">
@@ -1041,14 +1121,31 @@ export default function Index() {
           {error && <s-banner tone="critical">{error}</s-banner>}
           {success ? (
             <s-banner tone="success">
-              Pedido criado com sucesso.{" "}
-              <a href={success.invoiceUrl} target="_blank" rel="noreferrer">
-                Abrir checkout
-              </a>
+              <s-stack direction="block" gap="base">
+                <s-text>{success.name} criado com sucesso.</s-text>
+                <s-text>Link do checkout:</s-text>
+                <s-link href={success.invoiceUrl} target="_blank">
+                  {success.invoiceUrl}
+                </s-link>
+                <s-button
+                  variant="tertiary"
+                  onClick={handleCopyCheckoutLink}
+                >
+                  {checkoutLinkCopied ? "Link copiado" : "Copiar link"}
+                </s-button>
+              </s-stack>
             </s-banner>
           ) : null}
-          <s-button disabled={!canCreateOrder} onClick={handleCreateDraftOrder}>
-            {isCreating ? "Criando…" : "Criar pedido e gerar link de pagamento"}
+          <s-button
+            disabled={!canCreateOrder}
+            loading={isCreating}
+            onClick={handleCreateDraftOrder}
+          >
+            {isCreating
+              ? "Criando…"
+              : currentOrderAlreadySubmitted
+                ? "Pedido criado — altere algum dado para criar outro"
+                : "Criar pedido e gerar link de pagamento"}
           </s-button>
         </s-stack>
       </s-section>
