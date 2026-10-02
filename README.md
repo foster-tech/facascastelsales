@@ -46,6 +46,7 @@ BLING_CLIENT_ID=...
 BLING_CLIENT_SECRET=...
 BLING_REDIRECT_URI=https://facascastelsales.vercel.app/api/bling/callback
 BLING_RETRY_SECRET=...
+CRON_SECRET=...
 ```
 
 Authorize the Bling integration once after deployment by opening:
@@ -66,15 +67,19 @@ DATABASE_URL=postgresql://...
 
 After adding the integration, run `npx prisma migrate deploy` once with the Vercel `DATABASE_URL` available to create the application tables, including `Session`. Locally, run `vercel env pull .env` first. Do not commit this connection string.
 
-The application does not create sales orders in Bling. It waits for the native Shopify -> Bling integration to import the order, then queries `GET /pedidos/vendas` once with the official `numerosLojas[]` filter. The filter value is the internal Shopify Order ID (for example, `18912198951191`), never the visual order name (for example, `#4681`). A match is accepted only when the response contains exactly one order and its `numeroLoja` is exactly the requested Shopify ID. Otherwise the `BlingOrderSync` remains `PENDING` for a later retry.
+The application does not create sales orders in Bling. It waits for the native Shopify -> Bling integration to import the order. The Bling application must send the **Pedido de Venda / created / v1** webhook to `https://facascastelsales.vercel.app/api/bling/retry`. The endpoint validates `X-Bling-Signature-256` against the original request body and `BLING_CLIENT_SECRET`, stores each `eventId` in `BlingWebhookEvent`, and acknowledges the delivery before processing it with Vercel `waitUntil`.
+
+The webhook's `data.numeroLoja` must be the internal Shopify Order ID (for example, `18912198951191`), never the visual order name (for example, `#4681`). If the Bling webhook arrives before Shopify `orders/paid`, it remains `PENDING` until the corresponding `BlingOrderSync` exists. If Shopify arrives first, the existing `numerosLojas[]` lookup remains available as a fallback. The app never creates a replacement sales order.
 
 The UI searches sellers with `GET /vendedores` and contacts with `GET /contatos`. On submission, both selections are validated again through their individual Bling endpoints. The sales order is then sent through the documented full `PUT` operation with `vendedor: { id: <numeric Bling seller ID> }` and, when a customer was selected, `contato: { id: <numeric Bling contact ID> }`. Names are never sent in those native ID fields. Legacy orders that only contain a seller name can still fall back to an exact active-name lookup.
 
 The official Bling schema makes `loja` optional, requires a numeric `loja.id` when present, and does not document either `loja: null` or `loja: { id: 0 }`. Therefore the update omits `loja` to represent **Loja = Nenhuma**, while preserving the other writable fields returned by the order detail endpoint. This removes the store association from that Bling order after the native import; it does not create a replacement order. If the Bling -> Shopify return channel (for example, shipment/status data) is needed for this order, do not remove the store association without first validating that business flow.
 
-Pending imports can be retried by an authorized scheduler with `POST /api/bling/retry` and the `x-bling-retry-secret` header. The order lookup logs only the searched Shopify ID, the result count, whether the exact match was accepted, and the matched Bling order ID.
+Pending imports and persisted webhook events can still be retried manually with `POST /api/bling/retry` and the `x-bling-retry-secret` header. This authentication mechanism is unchanged. The root `vercel.json` also schedules `GET /api/bling/retry` every five minutes; Vercel authenticates that request with `Authorization: Bearer <CRON_SECRET>`. Configure `CRON_SECRET` in Vercel before enabling the cron.
 
-Deploy the Prisma migration before releasing this version so `BlingOrderSync` can retain the selected Bling contact reference:
+Before a synchronization is marked `SYNCED`, the application reads the Bling order again and verifies that `vendedor.id` matches the expected numeric seller ID. Atomic `PROCESSING` claims prevent concurrent workers from updating the same synchronization, while stale claims become retryable after five minutes.
+
+Deploy the Prisma migrations before releasing this version. The webhook migration adds the durable `BlingWebhookEvent` queue and the `PROCESSING` synchronization status:
 
 ```shell
 npx prisma migrate deploy

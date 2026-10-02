@@ -727,111 +727,192 @@ export async function updateBlingOrderAssignments(
   });
 }
 
-export async function processBlingOrderSync(sync: BlingOrderSync) {
-  console.log("[bling] Sync processing started", {
-    syncId: sync.id,
-    shopDomain: sync.shopDomain,
-    shopifyOrderId: sync.shopifyOrderId,
-    shopifyOrderName: sync.shopifyOrderName,
-    status: sync.status,
-    attempts: sync.attempts,
-    hasSellerName: Boolean(sync.sellerName),
-    hasSellerId: Boolean(sync.sellerId),
-    hasBlingContactId: Boolean(sync.blingContactId),
-  });
-
-  if (!sync.sellerName && !sync.sellerId) {
-    console.error("[bling] Sync processing stopped: seller is missing", {
-      syncId: sync.id,
-      shopifyOrderName: sync.shopifyOrderName,
-    });
-    throw new Error("Sincronização sem vendedor associado.");
-  }
-
-  const blingOrder = await findBlingOrderByShopifyOrder(sync.shopifyOrderId);
-
-  if (!blingOrder || !blingOrder.id) {
-    const pendingSync = await db.blingOrderSync.update({
-      where: { id: sync.id },
-      data: {
-        status: "PENDING",
-        attempts: { increment: 1 },
-        lastError: "Pedido ainda não importado no Bling.",
-      },
-    });
-    console.log("[bling] Sync kept pending", {
-      syncId: pendingSync.id,
-      status: pendingSync.status,
-      attempts: pendingSync.attempts,
-      lastError: pendingSync.lastError,
-    });
-    return pendingSync;
-  }
-
-  const blingOrderDetails = await getBlingOrderDetails(blingOrder.id);
-  if (!blingOrderDetails || !blingOrderDetails.id) {
-    console.warn("[bling] Order details response has no valid id", {
-      syncId: sync.id,
-      requestedBlingOrderId: blingOrder.id,
-      shopifyOrderName: sync.shopifyOrderName,
-    });
-    const pendingSync = await db.blingOrderSync.update({
-      where: { id: sync.id },
-      data: {
-        status: "PENDING",
-        attempts: { increment: 1 },
-        lastError: "Pedido encontrado no Bling sem ID v\u00e1lido.",
-      },
-    });
-    console.log("[bling] Sync kept pending", {
-      syncId: pendingSync.id,
-      status: pendingSync.status,
-      attempts: pendingSync.attempts,
-      lastError: pendingSync.lastError,
-    });
-    return pendingSync;
-  }
-
-  const blingSellerId =
-    parseBlingNumericId(sync.sellerId) ||
-    (sync.sellerName ? await findBlingSellerIdByName(sync.sellerName) : null);
-  if (!blingSellerId) {
-    throw new Error("Sincronização sem ID válido de vendedor do Bling.");
-  }
-  const blingContactId = parseBlingNumericId(sync.blingContactId);
-  console.log("[bling] Updating Bling order", {
-    syncId: sync.id,
-    blingOrderId: blingOrderDetails.id,
-    blingSellerId,
-    blingContactId,
-    storeFieldOmitted: true,
-  });
-  await updateBlingOrderAssignments(
-    blingOrderDetails,
-    blingSellerId,
-    blingContactId,
-  );
-  console.log("[bling] Bling order update completed", {
-    syncId: sync.id,
-    blingOrderId: blingOrderDetails.id,
-  });
-
-  const synchronizedSync = await db.blingOrderSync.update({
-    where: { id: sync.id },
+export async function processBlingOrderSync(
+  sync: BlingOrderSync,
+  options: { blingOrderId?: string } = {},
+) {
+  const staleBefore = new Date(Date.now() - 5 * 60 * 1000);
+  const knownBlingOrderId =
+    options.blingOrderId || sync.blingOrderId || undefined;
+  const claimed = await db.blingOrderSync.updateMany({
+    where: {
+      id: sync.id,
+      OR: [
+        { status: { in: ["PENDING", "FAILED"] } },
+        { status: "PROCESSING", updatedAt: { lt: staleBefore } },
+      ],
+    },
     data: {
-      blingOrderId: String(blingOrderDetails.id),
-      status: "SYNCED",
+      status: "PROCESSING",
       attempts: { increment: 1 },
       lastError: null,
+      ...(knownBlingOrderId ? { blingOrderId: knownBlingOrderId } : {}),
     },
   });
-  console.log("[bling] Sync marked as synchronized", {
-    syncId: synchronizedSync.id,
-    status: synchronizedSync.status,
-    attempts: synchronizedSync.attempts,
-    blingOrderId: synchronizedSync.blingOrderId,
+
+  if (claimed.count === 0) {
+    const currentSync = await db.blingOrderSync.findUnique({
+      where: { id: sync.id },
+    });
+    if (!currentSync) {
+      throw new Error("Sincronização não encontrada.");
+    }
+    console.log("[bling] Sync processing skipped", {
+      syncId: currentSync.id,
+      status: currentSync.status,
+    });
+    return currentSync;
+  }
+
+  const claimedSync = await db.blingOrderSync.findUniqueOrThrow({
+    where: { id: sync.id },
   });
-  return synchronizedSync;
+  sync = claimedSync;
+  try {
+    console.log("[bling] Sync processing started", {
+      syncId: sync.id,
+      shopDomain: sync.shopDomain,
+      shopifyOrderId: sync.shopifyOrderId,
+      shopifyOrderName: sync.shopifyOrderName,
+      status: sync.status,
+      attempts: sync.attempts,
+      hasSellerName: Boolean(sync.sellerName),
+      hasSellerId: Boolean(sync.sellerId),
+      hasBlingContactId: Boolean(sync.blingContactId),
+    });
+
+    if (!sync.sellerName && !sync.sellerId) {
+      console.error("[bling] Sync processing stopped: seller is missing", {
+        syncId: sync.id,
+        shopifyOrderName: sync.shopifyOrderName,
+      });
+      throw new Error("Sincronização sem vendedor associado.");
+    }
+
+    const blingOrder = knownBlingOrderId
+      ? { id: knownBlingOrderId, numeroLoja: sync.shopifyOrderId }
+      : await findBlingOrderByShopifyOrder(sync.shopifyOrderId);
+
+    if (!blingOrder || !blingOrder.id) {
+      const pendingSync = await db.blingOrderSync.update({
+        where: { id: sync.id },
+        data: {
+          status: "PENDING",
+          lastError: "Pedido ainda não importado no Bling.",
+        },
+      });
+      console.log("[bling] Sync kept pending", {
+        syncId: pendingSync.id,
+        status: pendingSync.status,
+        attempts: pendingSync.attempts,
+        lastError: pendingSync.lastError,
+      });
+      return pendingSync;
+    }
+
+    const blingOrderDetails = await getBlingOrderDetails(blingOrder.id);
+    if (!blingOrderDetails || !blingOrderDetails.id) {
+      console.warn("[bling] Order details response has no valid id", {
+        syncId: sync.id,
+        requestedBlingOrderId: blingOrder.id,
+        shopifyOrderName: sync.shopifyOrderName,
+      });
+      const pendingSync = await db.blingOrderSync.update({
+        where: { id: sync.id },
+        data: {
+          status: "PENDING",
+          lastError: "Pedido encontrado no Bling sem ID v\u00e1lido.",
+        },
+      });
+      console.log("[bling] Sync kept pending", {
+        syncId: pendingSync.id,
+        status: pendingSync.status,
+        attempts: pendingSync.attempts,
+        lastError: pendingSync.lastError,
+      });
+      return pendingSync;
+    }
+
+    const orderShopifyId =
+      typeof blingOrderDetails.numeroLoja === "string" ||
+      typeof blingOrderDetails.numeroLoja === "number"
+        ? String(blingOrderDetails.numeroLoja).trim()
+        : null;
+    if (orderShopifyId !== sync.shopifyOrderId) {
+      throw new Error(
+        "O numeroLoja do pedido Bling não corresponde ao ID interno do pedido Shopify.",
+      );
+    }
+
+    const blingSellerId =
+      parseBlingNumericId(sync.sellerId) ||
+      (sync.sellerName ? await findBlingSellerIdByName(sync.sellerName) : null);
+    if (!blingSellerId) {
+      throw new Error("Sincronização sem ID válido de vendedor do Bling.");
+    }
+    const blingContactId = parseBlingNumericId(sync.blingContactId);
+    console.log("[bling] Seller resolved for order update", {
+      syncId: sync.id,
+      blingOrderId: blingOrderDetails.id,
+      blingSellerId,
+      blingContactId,
+      storeFieldOmitted: true,
+    });
+    await updateBlingOrderAssignments(
+      blingOrderDetails,
+      blingSellerId,
+      blingContactId,
+    );
+    console.log("[bling] Bling order update completed", {
+      syncId: sync.id,
+      blingOrderId: blingOrderDetails.id,
+    });
+
+    const confirmedOrder = await getBlingOrderDetails(blingOrderDetails.id);
+    const confirmedSellerId =
+      confirmedOrder?.vendedor && typeof confirmedOrder.vendedor === "object"
+        ? parseBlingNumericId((confirmedOrder.vendedor as { id?: unknown }).id)
+        : null;
+    console.log("[bling] Seller confirmation completed", {
+      syncId: sync.id,
+      blingOrderId: blingOrderDetails.id,
+      expectedSellerId: blingSellerId,
+      confirmedSellerId,
+      matched: confirmedSellerId === blingSellerId,
+    });
+    if (confirmedSellerId !== blingSellerId) {
+      throw new Error(
+        "O Bling não confirmou o vendedor esperado após a atualização.",
+      );
+    }
+
+    const synchronizedSync = await db.blingOrderSync.update({
+      where: { id: sync.id },
+      data: {
+        blingOrderId: String(blingOrderDetails.id),
+        status: "SYNCED",
+        lastError: null,
+      },
+    });
+    console.log("[bling] Sync marked as synchronized", {
+      syncId: synchronizedSync.id,
+      status: synchronizedSync.status,
+      attempts: synchronizedSync.attempts,
+      blingOrderId: synchronizedSync.blingOrderId,
+    });
+    return synchronizedSync;
+  } catch (error) {
+    const status: BlingOrderSyncStatus =
+      error instanceof BlingRateLimitError ? "PENDING" : "FAILED";
+    await db.blingOrderSync.updateMany({
+      where: { id: sync.id, status: "PROCESSING" },
+      data: {
+        status,
+        lastError: error instanceof Error ? error.message : String(error),
+      },
+    });
+    throw error;
+  }
 }
 
 export async function markBlingOrderSyncFailed(
@@ -842,7 +923,6 @@ export async function markBlingOrderSyncFailed(
     where: { id: syncId },
     data: {
       status: "FAILED" as BlingOrderSyncStatus,
-      attempts: { increment: 1 },
       lastError: error instanceof Error ? error.message : String(error),
     },
   });

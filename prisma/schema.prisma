@@ -44,7 +44,16 @@ model Seller {
 
 enum BlingOrderSyncStatus {
   PENDING
+  PROCESSING
   SYNCED
+  FAILED
+}
+
+enum BlingWebhookEventStatus {
+  PENDING
+  PROCESSING
+  PROCESSED
+  IGNORED
   FAILED
 }
 
@@ -64,9 +73,33 @@ model BlingOrderSync {
   lastError       String?
   createdAt       DateTime           @default(now())
   updatedAt       DateTime           @updatedAt
+  webhookEvents   BlingWebhookEvent[]
 
   @@unique([shopDomain, shopifyOrderId])
   @@index([status, updatedAt])
+}
+
+model BlingWebhookEvent {
+  eventId             String                  @id
+  event               String
+  version             String
+  companyId           String
+  blingOrderId        String
+  shopifyOrderId      String
+  payload             Json
+  status              BlingWebhookEventStatus @default(PENDING)
+  attempts            Int                     @default(0)
+  lastError           String?
+  processingStartedAt DateTime?
+  processedAt         DateTime?
+  syncId              String?
+  sync                BlingOrderSync?         @relation(fields: [syncId], references: [id], onDelete: SetNull)
+  receivedAt          DateTime                @default(now())
+  updatedAt           DateTime                @updatedAt
+
+  @@index([status, updatedAt])
+  @@index([shopifyOrderId])
+  @@index([syncId])
 }
 
 model BlingOAuthToken {

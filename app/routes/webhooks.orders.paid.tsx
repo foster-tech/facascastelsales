@@ -6,6 +6,10 @@ import {
   markBlingOrderSyncFailed,
   processBlingOrderSync,
 } from "../services/bling.server";
+import {
+  findRetryableBlingWebhookEvent,
+  processBlingWebhookEvent,
+} from "../services/bling-webhook.server";
 
 const getAttribute = (attributes: unknown, key: string) => {
   if (!Array.isArray(attributes)) {
@@ -20,7 +24,7 @@ const getAttribute = (attributes: unknown, key: string) => {
   return attribute?.value?.trim() || null;
 };
 
-const getOrderGid = (payload: Record<string, any>) => {
+const getOrderGid = (payload: Record<string, unknown>) => {
   const externalId = payload.admin_graphql_api_id || payload.admin_graphql_api_order_id;
   if (externalId) {
     return String(externalId);
@@ -158,7 +162,8 @@ export const action = async ({ request }: ActionFunctionArgs) => {
   const orderGid = getOrderGid(payload);
   const attributes = payload.note_attributes || payload.custom_attributes;
   const sellerIdAttribute =
-    getAttribute(attributes, "_bling_seller_id") || getAttribute(attributes, "_seller_id");
+    getAttribute(attributes, "_bling_seller_id") ||
+    getAttribute(attributes, "_seller_id");
   const sellerAttributeName = getAttribute(attributes, "vendedor");
   const blingContactIdAttribute = getAttribute(attributes, "_bling_contact_id");
   const blingContactName = getAttribute(attributes, "cliente_bling");
@@ -302,7 +307,37 @@ export const action = async ({ request }: ActionFunctionArgs) => {
         syncId: sync.id,
         status: sync.status,
       });
-      const processedSync = await processBlingOrderSync(sync);
+      const pendingBlingEvent =
+        await findRetryableBlingWebhookEvent(shopifyOrderId);
+      if (pendingBlingEvent) {
+        console.log(
+          "[orders/paid] Processing previously received Bling event",
+          {
+            syncId: sync.id,
+            eventId: pendingBlingEvent.eventId,
+            blingOrderId: pendingBlingEvent.blingOrderId,
+          },
+        );
+        const eventResult = await processBlingWebhookEvent(
+          pendingBlingEvent.eventId,
+        );
+        const currentSync = await db.blingOrderSync.findUniqueOrThrow({
+          where: { id: sync.id },
+        });
+        if (
+          eventResult.outcome === "processing" &&
+          currentSync.status !== "SYNCED"
+        ) {
+          await processBlingOrderSync(currentSync, {
+            blingOrderId: pendingBlingEvent.blingOrderId,
+          });
+        }
+      } else {
+        await processBlingOrderSync(sync);
+      }
+      const processedSync = await db.blingOrderSync.findUniqueOrThrow({
+        where: { id: sync.id },
+      });
       console.log("[orders/paid] Bling synchronization finished", {
         syncId: processedSync.id,
         status: processedSync.status,
@@ -330,7 +365,6 @@ export const action = async ({ request }: ActionFunctionArgs) => {
         where: { id: sync.id },
         data: {
           status: "PENDING",
-          attempts: { increment: 1 },
           lastError: error.message,
         },
       });
