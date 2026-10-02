@@ -10,6 +10,9 @@ vi.mock("../db.server", () => ({ default: {} }));
 vi.mock("./bling.server", () => ({ processBlingOrderSync: vi.fn() }));
 
 import {
+  BlingWebhookIgnoredEventError,
+  parseBlingOrderCreatedWebhook,
+  parseBlingWebhookEnvelope,
   processBlingWebhookEventWith,
   verifyBlingWebhookSignature,
   type BlingWebhookProcessingDependencies,
@@ -140,6 +143,41 @@ describe("Bling webhook signature", () => {
     expect(verifyBlingWebhookSignature(body, null, secret)).toBe(false);
     expect(verifyBlingWebhookSignature(body, "sha256=invalid", secret)).toBe(
       false,
+    );
+  });
+});
+
+describe("Bling order.created payload", () => {
+  it("accepts numeroLoja as the arbitrary non-empty string documented by Bling", () => {
+    const envelope = parseBlingWebhookEnvelope(
+      JSON.stringify({
+        eventId: "event-1",
+        companyId: "company-1",
+        version: "v1",
+        event: "order.created",
+        data: { id: 9001, numeroLoja: "Loja_123" },
+      }),
+    );
+
+    expect(parseBlingOrderCreatedWebhook(envelope).data).toEqual({
+      id: "9001",
+      numeroLoja: "Loja_123",
+    });
+  });
+
+  it("classifies an empty numeroLoja as an ignored order", () => {
+    const envelope = parseBlingWebhookEnvelope(
+      JSON.stringify({
+        eventId: "event-1",
+        companyId: "company-1",
+        version: "v1",
+        event: "order.created",
+        data: { id: 9001, numeroLoja: null },
+      }),
+    );
+
+    expect(() => parseBlingOrderCreatedWebhook(envelope)).toThrow(
+      BlingWebhookIgnoredEventError,
     );
   });
 });

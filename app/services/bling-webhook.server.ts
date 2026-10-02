@@ -22,6 +22,13 @@ export type BlingOrderCreatedWebhook = {
   rawPayload: Record<string, unknown>;
 };
 
+export class BlingWebhookIgnoredEventError extends Error {
+  constructor(message: string) {
+    super(message);
+    this.name = "BlingWebhookIgnoredEventError";
+  }
+}
+
 type BlingWebhookEnvelope = {
   eventId: string;
   companyId: string;
@@ -144,10 +151,17 @@ export function parseBlingOrderCreatedWebhook(
   }
 
   const blingOrderId = parsePositiveNumericId(envelope.data.id);
-  const shopifyOrderId = parsePositiveNumericId(envelope.data.numeroLoja);
-  if (!blingOrderId || !shopifyOrderId) {
-    throw new Error(
-      "Evento order.created sem data.id ou data.numeroLoja válido.",
+  if (!blingOrderId) {
+    throw new Error("Evento order.created sem data.id numérico válido.");
+  }
+
+  // `numeroLoja` is an arbitrary string in the official Bling webhook
+  // contract. Keep its exact value so only an exact BlingOrderSync match can
+  // authorize an update; do not infer a Shopify ID from prefixes or order names.
+  const shopifyOrderId = parseIdentifier(envelope.data.numeroLoja);
+  if (!shopifyOrderId) {
+    throw new BlingWebhookIgnoredEventError(
+      "Evento order.created sem data.numeroLoja; pedido fora do fluxo Shopify.",
     );
   }
 

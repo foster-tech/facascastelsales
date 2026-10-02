@@ -6,6 +6,7 @@ import {
   processBlingOrderSync,
 } from "../services/bling.server";
 import {
+  BlingWebhookIgnoredEventError,
   parseBlingOrderCreatedWebhook,
   parseBlingWebhookEnvelope,
   persistBlingWebhookEvent,
@@ -143,9 +144,35 @@ async function handleBlingWebhook(request: Request) {
   try {
     payload = parseBlingOrderCreatedWebhook(envelope);
   } catch (error) {
+    const dataId = envelope.data.id;
+    const numeroLoja = envelope.data.numeroLoja;
+    if (error instanceof BlingWebhookIgnoredEventError) {
+      console.log("[bling/webhook] order.created ignored", {
+        eventId: envelope.eventId,
+        companyId: envelope.companyId,
+        blingOrderId:
+          typeof dataId === "string" || typeof dataId === "number"
+            ? String(dataId)
+            : null,
+        numeroLojaType: numeroLoja === null ? "null" : typeof numeroLoja,
+        reason: error.message,
+      });
+      return new Response(null, { status: 204 });
+    }
+
     console.warn("[bling/webhook] Invalid order.created payload", {
       eventId: envelope.eventId,
       companyId: envelope.companyId,
+      dataId:
+        typeof dataId === "string" || typeof dataId === "number"
+          ? String(dataId)
+          : null,
+      dataIdType: dataId === null ? "null" : typeof dataId,
+      numeroLoja:
+        typeof numeroLoja === "string" || typeof numeroLoja === "number"
+          ? String(numeroLoja)
+          : null,
+      numeroLojaType: numeroLoja === null ? "null" : typeof numeroLoja,
       reason: error instanceof Error ? error.message : String(error),
     });
     return new Response("Invalid webhook payload", { status: 400 });
